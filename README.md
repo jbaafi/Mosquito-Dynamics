@@ -39,10 +39,12 @@ DOI: [10.1007/s11538-024-01409-7](https://doi.org/10.1007/s11538-024-01409-7)
 
 ## Author
 
+## Author
+
 **Joseph Baafi**  
 PhD Candidate – Mathematical Biology  
 Memorial University of Newfoundland  
 📧 jbaafi89@gmail.com  
-🔗 [LinkedIn](https://www.linkedin.com/in/josephbaafi/)
-[Website](https://jbaafi.github.io/joseph.baafi/)
+🔗 [LinkedIn](https://www.linkedin.com/in/josephbaafi/)  
+🌐 [Website](https://jbaafi.github.io/joseph.baafi/)
 
