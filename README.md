@@ -11,7 +11,17 @@ This repository presents a simplified model of Anopheles mosquito population dyn
 - R (`deSolve`, `ggplot2`, `dplyr`, `lhs`)
 - Simulated climate input data
 
-## Example
-To run the model:
+## To Run the Model
+
+Open the R Markdown file and click **"Knit"** in RStudio, or run the following in the R console:
+
 ```r
-Knit("code/model_summary.Rmd")
+rmarkdown::render("code/model_summary.Rmd")
+
+## Repository Structure
+
+project-root/
+├── code/ # R Markdown model implementation
+├── data/ # Simulated temperature and rainfall input data
+├── figures/ # Output plots generated from the model
+└── README.md # Project description and usage instructions
