@@ -21,11 +21,13 @@ rmarkdown::render("code/model_summary.Rmd")
 
 ## Repository Structure
 
+```r
 project-root/
 ├── code/ # R Markdown model implementation
 ├── data/ # Simulated temperature and rainfall input data
 ├── figures/ # Output plots generated from the model
 └── README.md # Project description and usage instructions
+```
 
 ## Citation
 
@@ -42,4 +44,5 @@ PhD Candidate – Mathematical Biology
 Memorial University of Newfoundland  
 📧 jbaafi89@gmail.com  
 🔗 [LinkedIn](https://www.linkedin.com/in/josephbaafi/)
+[Website](https://jbaafi.github.io/joseph.baafi/)
 
