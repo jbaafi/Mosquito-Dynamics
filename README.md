@@ -17,6 +17,7 @@ Open the R Markdown file and click **"Knit"** in RStudio, or run the following i
 
 ```r
 rmarkdown::render("code/model_summary.Rmd")
+```
 
 ## Repository Structure
 
@@ -25,3 +26,20 @@ project-root/
 ├── data/ # Simulated temperature and rainfall input data
 ├── figures/ # Output plots generated from the model
 └── README.md # Project description and usage instructions
+
+## Citation
+
+If you use this model or its components in your work, please cite:
+
+Baafi, J. & Hurford, A. (2025). *Modeling the Impact of Seasonality on Mosquito Population Dynamics: Insights for Vector Control Strategies*. Bulletin of Mathematical Biology.
+
+DOI: [10.1007/s11538-024-01409-7](https://doi.org/10.1007/s11538-024-01409-7)
+
+## Author
+
+**Joseph Baafi**  
+PhD Candidate – Mathematical Biology  
+Memorial University of Newfoundland  
+📧 jbaafi89@gmail.com  
+🔗 [LinkedIn](https://www.linkedin.com/in/josephbaafi/)
+
