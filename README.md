@@ -1,6 +1,6 @@
-# Mosquito Population Dynamics Model
+# Tropical Mosquito Dynamics: A Climate-Driven Model of Anopheles Populations
 
-This repository contains a simplified version of a climate-driven mosquito population dynamics model. The model uses temperature and rainfall inputs to simulate mosquito life stages over time.
+This repository presents a simplified model of Anopheles mosquito population dynamics under seasonal climatic conditions typical of sub-Saharan Africa. Temperature and rainfall inputs drive the life cycle dynamics across multiple stages.
 
 ## Features
 - Deterministic simulation
