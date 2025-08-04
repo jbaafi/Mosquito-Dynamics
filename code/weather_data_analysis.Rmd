@@ -1,0 +1,1176 @@
+---
+title: "Weather Information"
+author: "jbaafi"
+date: "2024-03-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## African Map showing the various regions
+
+```{r}
+
+rm(list = ls())
+library(rnaturalearth)
+library(ggplot2)
+
+# Load the map data for Africa using the "rnaturalearth" package
+map_africa <- ne_countries(scale = "medium", continent = "Africa", returnclass = "sf")
+
+# Create a base plot using ggplot and the map data
+plot_base <- ggplot() +
+  geom_sf(data = map_africa, fill = "white", color = "black") +
+  coord_sf() +
+  theme_void()
+
+# Define the cities of interest and their coordinates and colors
+cities_of_interest <- data.frame(
+  city = c("Ain Mahbel", "Kumasi", "Cape Town", "Nairobi"),
+  lon = c(9.6981, -1.6105, 18.4241, 36.8219),
+  lat = c(35.5063, 6.6885, -33.9249, -1.2864),
+  color = c("purple", "darkred", "darkgreen", "orange")
+)
+
+# Overlay the highlighted cities on the base plot with different colors
+highlighted_cities <- plot_base +
+  geom_point(data = cities_of_interest, aes(x = lon, y = lat, color = color), size = 4) +
+  geom_text(data = cities_of_interest, aes(x = lon, y = lat, label = city), vjust = -0.5)
+
+# Customize the plot as desired, adding titles, labels, or adjusting the appearance
+plot_map <- highlighted_cities +
+  #labs(title = "Regions of interest in Africa",
+       #subtitle = "Cities of Interest: Ain Mahbel, Kumasi, Cape Town, Nairobi"
+  #) +
+  scale_color_identity()
+
+# Display the final plot
+plot_map
+
+# Save the plot
+#ggsave(plot_map, filename = "map.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+```{r}
+# # Algeria temperature data
+
+
+# Load packages
+pacman::p_load(pacman, rio, ggplot2, tidyverse, dplyr, patchwork)
+
+# Put the average temperature in this data frame format
+df <- read.table(text = 
+                   "Date           Temp
+2020-01-01      6.5       
+2020-02-01      7.5          
+2020-03-01      10.5
+2020-04-01      15       
+2020-05-01      20       
+2020-06-01      25.5
+2020-07-01      29.5   
+2020-08-01      28.5      
+2020-09-01      23.5
+2020-10-01      17.5      
+2020-11-01      11.0          
+2020-12-01      7.5",
+                 header = TRUE, stringsAsFactors = FALSE)
+
+Dates <- seq(from = min(as.Date(df$Date)),
+             to = ceiling_date(max(as.Date(df$Date)), "month") - days(1),
+             by = "1 days")
+
+df <- data.frame(Date = Dates,
+                 Temp = setNames(df$Temp, df$Date)[format(Dates, format = "%Y-%m-01")])
+
+start.date <- as.Date("2020-01-01") # The starting date
+df$Days.Since.Origin <- (as.numeric(as.Date(df$Date) - start.date))
+
+# Define the function
+temp.func <- function(t, a, ampl1, ampl2) {
+  a + ampl1 * sin(2 * pi * t / 365) + ampl2 * cos(2 * pi * t / 365)
+}
+
+# Fit the function to the data
+fit <- nls(Temp ~ temp.func(Days.Since.Origin, a, ampl1, ampl2), 
+           data = df,
+           start = list(a = 0, ampl1 = 10, ampl2 = 10))
+
+# Generate a denser sequence of days for smoother curve
+seq_days <- seq(from = min(df$Days.Since.Origin),
+                to = max(df$Days.Since.Origin),
+                by = 1)
+
+# Predict temperature values for the smoother curve
+predicted_temp <- predict(fit, newdata = data.frame(Days.Since.Origin = seq_days))
+
+# Create the plot
+ggplot(df, aes(x = Date, y = Temp)) +
+  geom_point() +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days, Temp = predicted_temp), aes(x = as.Date(start.date) + Days.Since.Origin), color = "red") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Temperature") +
+  ggtitle("Temperature Data and Fitted Function")
+
+# Same job but plot temperature as single points for each month instead of many same points
+
+# This data is from Algeria
+# Put the average temperature in this data frame format
+df <- read.table(text = 
+                   "Date           Temp
+2020-01-01      6.5       
+2020-02-01      7.5          
+2020-03-01      10.5
+2020-04-01      15       
+2020-05-01      20       
+2020-06-01      25.5
+2020-07-01      29.5   
+2020-08-01      28.5      
+2020-09-01      23.5
+2020-10-01      17.5      
+2020-11-01      11.0          
+2020-12-01      7.5",
+                 header = TRUE, stringsAsFactors = FALSE)
+
+Dates <- seq(from = min(as.Date(df$Date)),
+             to = ceiling_date(max(as.Date(df$Date)), "month") - days(1),
+             by = "1 month")
+
+df <- data.frame(Date = Dates,
+                 Temp = setNames(df$Temp, df$Date)[format(Dates, format = "%Y-%m-01")])
+
+start.date <- as.Date("2020-01-01") # The starting date
+df$Days.Since.Origin <- (as.numeric(as.Date(df$Date) - start.date))
+
+# Define the function
+temp.func <- function(t, a, ampl1, ampl2) {
+  a + ampl1 * sin(2 * pi * t / 365) + ampl2 * cos(2 * pi * t / 365)
+}
+
+# Fit the function to the data
+fit <- nls(Temp ~ temp.func(Days.Since.Origin, a, ampl1, ampl2), 
+           data = df,
+           start = list(a = 0, ampl1 = 10, ampl2 = 10))
+
+# Generate a denser sequence of days for smoother curve
+seq_days <- seq(from = min(df$Days.Since.Origin),
+                to = max(df$Days.Since.Origin),
+                by = 1)
+
+# Predict temperature values for the smoother curve
+predicted_temp <- predict(fit, newdata = data.frame(Days.Since.Origin = seq_days))
+
+# Calculate R-squared value
+residuals <- df$Temp - predict(fit)
+ss_residuals <- sum(residuals^2)
+ss_total <- sum((df$Temp - mean(df$Temp))^2)
+r_squared <- 1 - (ss_residuals / ss_total)
+
+# Create the plot
+ggp1 <- ggplot() +
+  geom_point(data = df, aes(x = Date, y = Temp), color = "blue") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days, Temp = predicted_temp),
+            aes(x = as.Date(start.date) + Days.Since.Origin, y = Temp), color = "blue") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Temperature") +
+  ggtitle("Temperature Data and Fitted Function") +
+  geom_text(aes(x = as.Date(start.date) + max(df$Days.Since.Origin), y = max(df$Temp),
+                label = paste0("R-squared = ", round(r_squared, 2))),
+            color = "blue", hjust = 1, vjust = -0.5) 
+
+ggp1 +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+# Create the plot
+ggplot() +
+  geom_point(data = df, aes(x = Date, y = Temp), color = "blue") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days, Temp = predicted_temp),
+            aes(x = as.Date(start.date) + Days.Since.Origin, y = Temp), color = "blue") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Temperature") +
+  ggtitle("Temperature Data and Fitted Function") +
+  geom_text(data = data.frame(Days.Since.Origin = max(df$Days.Since.Origin), Temp = predict(fit, newdata = data.frame(Days.Since.Origin = max(df$Days.Since.Origin)))),
+            aes(x = as.Date(start.date) + Days.Since.Origin, y = Temp, label = paste0("R-squared = ", round(r_squared, 2))),
+            hjust = 1, vjust = -0.5, position = position_dodge(width = 0.9), color = "blue")
+
+```
+
+
+```{r}
+
+# Ghana data
+
+# I am using 2020 here just to make the code easier to write. This is actually a modification from a code online
+# df contain only the average temp values calculated above.
+# This is data from Ghana.
+df.gh <- read.table(text = 
+                      "Date           Temp
+2020-01-01      29.0        
+2020-02-01      29.5          
+2020-03-01      29.5
+2020-04-01      29.0        
+2020-05-01      28.0          
+2020-06-01      26.5
+2020-07-01      25.0        
+2020-08-01      25.0          
+2020-09-01      25.0
+2020-10-01      26.5        
+2020-11-01      27.5          
+2020-12-01      28.0",
+                    header = TRUE, stringsAsFactors = FALSE)
+
+
+Dates <- seq(from = min(as.Date(df.gh$Date)),
+             to = ceiling_date(max(as.Date(df.gh$Date)), "month") - days(1),
+             by = "1 month")
+
+df.gh <- data.frame(Date.gh = Dates,
+                    Temp.gh = setNames(df.gh$Temp, df.gh$Date)[format(Dates, format = "%Y-%m-01")])
+
+start.date <- as.Date("2020-01-01") # The starting date
+df.gh$Days.Since.Origin.gh <- (as.numeric(as.Date(df.gh$Date.gh) - start.date))
+
+# Define the function
+temp.func <- function(t, a, ampl1, ampl2) {
+  a + ampl1 * sin(2 * pi * t / 365) + ampl2 * cos(2 * pi * t / 365)
+}
+
+# Fit the function to the data
+fit.gh <- nls(Temp.gh ~ temp.func(Days.Since.Origin.gh, a, ampl1, ampl2), 
+              data = df.gh,
+              start = list(a = 0, ampl1 = 10, ampl2 = 10))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.gh <- seq(from = min(df.gh$Days.Since.Origin.gh),
+                   to = max(df.gh$Days.Since.Origin.gh),
+                   by = 1)
+
+# Predict temperature values for the smoother curve
+predicted_temp.gh <- predict(fit.gh, newdata = data.frame(Days.Since.Origin.gh = seq_days.gh))
+
+# Calculate R-squared value
+residuals.gh <- df.gh$Temp.gh - predict(fit.gh)
+ss_residuals.gh <- sum(residuals.gh^2)
+ss_total.gh <- sum((df.gh$Temp.gh - mean(df.gh$Temp.gh))^2)
+r_squared.gh <- 1 - (ss_residuals.gh / ss_total.gh)
+
+# Create the plot
+ggp1 <- ggplot() +
+  geom_point(data = df.gh, aes(x = Date.gh, y = Temp.gh), color = "blue") +
+  geom_line(data = data.frame(Days.Since.Origin.gh = seq_days.gh, Temp.gh = predicted_temp.gh),
+            aes(x = as.Date(start.date) + Days.Since.Origin.gh, y = Temp.gh), color = "blue") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Temperature") +
+  ggtitle("Temperature Data and Fitted Function") +
+  geom_text(aes(x = as.Date(start.date) + max(df.gh$Days.Since.Origin.gh), y = max(df.gh$Temp.gh),
+                label = paste0("R-squared = ", round(r_squared.gh, 2))),
+            color = "blue", hjust = 1, vjust = -0.5) 
+
+ggp1 +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+```
+
+
+
+```{r}
+# Kenya data
+# Kenya data
+df.kenya <- read.table(text = 
+                         "Date           Temp
+2020-01-01      20.0       
+2020-02-01      21.0          
+2020-03-01      22.0
+2020-04-01      20.5        
+2020-05-01      19.0         
+2020-06-01      18.5
+2020-07-01      18.0      
+2020-08-01      19.0        
+2020-09-01      20.5
+2020-10-01      21.0        
+2020-11-01      20.0          
+2020-12-01      19.0",
+                       header = TRUE, stringsAsFactors = FALSE)
+
+Dates <- seq(from = min(as.Date(df.kenya$Date)),
+             to = ceiling_date(max(as.Date(df.kenya$Date)), "month") - days(1),
+             by = "1 month")
+
+df.kenya <- data.frame(Date.kenya = Dates,
+                       Temp.kenya = setNames(df.kenya$Temp, df.kenya$Date)[format(Dates, format = "%Y-%m-01")])
+
+start.date <- as.Date("2020-01-01") # The starting date
+df.kenya$Days.Since.Origin.kenya <- (as.numeric(as.Date(df.kenya$Date.kenya) - start.date))
+
+# Define the function
+temp.func <- function(t, a2, b, omega, theta) (a2*(1 + b*cos(2*pi*(omega*t + theta)/365))) 
+
+# Fitting the function to the data
+fit.kenya <- nls(Temp.kenya ~ temp.func(Days.Since.Origin.kenya, a2, b, omega, theta),
+                 data = df.kenya,
+                 start = list(a2 = 1, b = 1, omega = 1, theta = 1))
+
+# Printing the fitted model summary
+summary(fit.kenya)
+
+
+#rain.func2 <- function(t, a2, b, omega, theta) (a2*(1 + b*cos(2*pi*(omega*t + theta)/365))) # taken from Okuneye et al
+
+# Generate a denser sequence of days for smoother curve
+seq_days.kenya <- seq(from = min(df.kenya$Days.Since.Origin.kenya),
+                      to = max(df.kenya$Days.Since.Origin.kenya),
+                      by = 1)
+
+# Predict temperature values for the smoother curve
+predicted_temp.kenya <- predict(fit.kenya, newdata = data.frame(Days.Since.Origin.kenya = seq_days.kenya))
+
+# Calculate R-squared value
+residuals.kenya <- df.kenya$Temp.kenya - predict(fit.kenya)
+ss_residuals.kenya <- sum(residuals.kenya^2)
+ss_total.kenya <- sum((df.kenya$Temp.kenya - mean(df.kenya$Temp.kenya))^2)
+r_squared.kenya <- 1 - (ss_residuals.kenya / ss_total.kenya)
+
+# Create the plot
+ggp1.kenya <- ggplot() +
+  geom_point(data = df.kenya, aes(x = Date.kenya, y = Temp.kenya), color = "blue") +
+  geom_line(data = data.frame(Days.Since.Origin.kenya = seq_days.kenya, Temp.kenya = predicted_temp.kenya),
+            aes(x = as.Date(start.date) + Days.Since.Origin.kenya, y = Temp.kenya), color = "blue") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Temperature") +
+  ggtitle("Temperature Data and Fitted Function") +
+  geom_text(aes(x = as.Date(start.date) + max(df.kenya$Days.Since.Origin.kenya), y = max(df.kenya$Temp.kenya),
+                label = paste0("R-squared = ", round(r_squared.kenya, 2))),
+            color = "blue", hjust = 1, vjust = -0.5) 
+
+ggp1.kenya +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+
+```
+
+
+
+
+```{r}
+
+# Data for SA
+df.sa <- read.table(text = 
+                      "Date           Temp
+2020-01-01      22.0       
+2020-02-01      22.5          
+2020-03-01      21.0
+2020-04-01      19.0       
+2020-05-01      17.0         
+2020-06-01      15.0
+2020-07-01      14.0      
+2020-08-01      14.0        
+2020-09-01      15.5
+2020-10-01      17.0        
+2020-11-01      19.0          
+2020-12-01      20.5",
+                    header = TRUE, stringsAsFactors = FALSE)
+
+Dates <- seq(from = min(as.Date(df.sa$Date)),
+             to = ceiling_date(max(as.Date(df.sa$Date)), "month") - days(1),
+             by = "1 month")
+
+df.sa <- data.frame(Date.sa = Dates,
+                    Temp.sa = setNames(df.sa$Temp, df.sa$Date)[format(Dates, format = "%Y-%m-01")])
+
+start.date <- as.Date("2020-01-01") # The starting date
+df.sa$Days.Since.Origin.sa <- (as.numeric(as.Date(df.sa$Date.sa) - start.date))
+
+# Define the function
+temp.func <- function(t, a, ampl1, ampl2) {
+  a + ampl1 * sin(2 * pi * t / 365) + ampl2 * cos(2 * pi * t / 365)
+}
+
+# Fit the function to the data
+fit.sa <- nls(Temp.sa ~ temp.func(Days.Since.Origin.sa, a, ampl1, ampl2), 
+              data = df.sa,
+              start = list(a = 0, ampl1 = 10, ampl2 = 10))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.sa <- seq(from = min(df.sa$Days.Since.Origin.sa),
+                   to = max(df.sa$Days.Since.Origin.sa),
+                   by = 1)
+
+# Predict temperature values for the smoother curve
+predicted_temp.sa <- predict(fit.sa, newdata = data.frame(Days.Since.Origin.sa = seq_days.sa))
+
+# Calculate R-squared value
+residuals.sa <- df.sa$Temp.sa - predict(fit.sa)
+ss_residuals.sa <- sum(residuals.sa^2)
+ss_total.sa <- sum((df.sa$Temp.sa - mean(df.sa$Temp.sa))^2)
+r_squared.sa <- 1 - (ss_residuals.sa / ss_total.sa)
+
+# Create the plot
+ggp1 <- ggplot() +
+  geom_point(data = df.sa, aes(x = Date.sa, y = Temp.sa), color = "blue") +
+  geom_line(data = data.frame(Days.Since.Origin.sa = seq_days.sa, Temp.sa = predicted_temp.sa),
+            aes(x = as.Date(start.date) + Days.Since.Origin.sa, y = Temp.sa), color = "blue") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Temperature") +
+  ggtitle("Temperature Data and Fitted Function") +
+  geom_text(aes(x = as.Date(start.date) + max(df.sa$Days.Since.Origin.sa), y = max(df.sa$Temp.sa),
+                label = paste0("R-squared = ", round(r_squared.sa, 2))),
+            color = "blue", hjust = 1, vjust = -0.5) 
+
+ggp1 +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+```
+
+
+
+```{r}
+
+# temp data plot for all regions 
+
+ggplot() +
+  geom_point(data = df.gh, aes(x = Date.gh, y = Temp.gh), color = "darkred") +
+  geom_line(data = data.frame(Days.Since.Origin.gh = seq_days.gh, Temp.gh = predicted_temp.gh),
+            aes(x = as.Date(start.date) + Days.Since.Origin.gh, y = Temp.gh), color = "darkred") +
+  geom_point(data = df, aes(x = Date, y = Temp), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days, Temp = predicted_temp),
+            aes(x = as.Date(start.date) + Days.Since.Origin, y = Temp), color = "purple") +
+  geom_point(data = df.kenya, aes(x = Date.kenya, y = Temp.kenya), color = "orange") +
+  geom_line(data = data.frame(Days.Since.Origin.kenya = seq_days.kenya, Temp.kenya = predicted_temp.kenya),
+            aes(x = as.Date(start.date) + Days.Since.Origin.kenya, y = Temp.kenya), color = "orange") +
+  geom_point(data = df.sa, aes(x = Date.sa, y = Temp.sa), color = "darkgreen") +
+  geom_line(data = data.frame(Days.Since.Origin.sa = seq_days.sa, Temp.sa = predicted_temp.sa),
+            aes(x = as.Date(start.date) + Days.Since.Origin.sa, y = Temp.sa), color = "darkgreen") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  ylab(expression(paste("Temperature (", degree, "C)"))) +
+  xlab("") +
+  geom_text(aes(x = as.Date(start.date) + max(df$Days.Since.Origin), y = max(df$Temp),
+                label = paste0("R-squared = ", round(r_squared, 2))),
+            color = "purple", hjust = 1.5, vjust = 35) +
+  geom_text(aes(x = as.Date(start.date) + max(df.gh$Days.Since.Origin.gh), y = max(df.gh$Temp.gh),
+                label = paste0("R-squared = ", round(r_squared.gh, 2))),
+            color = "darkred", hjust = 1, vjust = 1.7) +
+  geom_text(aes(x = as.Date(start.date) + max(df.kenya$Days.Since.Origin.kenya), y = max(df.kenya$Temp.kenya),
+                label = paste0("R-squared = ", round(r_squared.kenya, 2))),
+            color = "orange", hjust = 1, vjust = 1) +
+  geom_text(aes(x = as.Date(start.date) + max(df.sa$Days.Since.Origin.sa), y = max(df.sa$Temp.sa),
+                label = paste0("R-squared = ", round(r_squared.sa, 2))),
+            color = "darkgreen", hjust = 2, vjust = 16) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12)
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_blank()
+  )
+
+```
+
+
+
+```{r}
+# This is same as above but without the R-squared values. We instead place the names of the locations on the plots
+
+# Combined plot for the different regions
+plot_temp <- ggplot() +
+  geom_point(data = df.gh, aes(x = Date.gh, y = Temp.gh), color = "darkred") +
+  geom_line(data = data.frame(Days.Since.Origin.gh = seq_days.gh, Temp.gh = predicted_temp.gh),
+            aes(x = as.Date(start.date) + Days.Since.Origin.gh, y = Temp.gh), color = "darkred", lwd = 1) +
+  geom_point(data = df, aes(x = Date, y = Temp), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days, Temp = predicted_temp),
+            aes(x = as.Date(start.date) + Days.Since.Origin, y = Temp), color = "purple", lwd = 1) +
+  geom_point(data = df.kenya, aes(x = Date.kenya, y = Temp.kenya), color = "orange") +
+  geom_line(data = data.frame(Days.Since.Origin.kenya = seq_days.kenya, Temp.kenya = predicted_temp.kenya),
+            aes(x = as.Date(start.date) + Days.Since.Origin.kenya, y = Temp.kenya), color = "orange", lwd = 1) +
+  geom_point(data = df.sa, aes(x = Date.sa, y = Temp.sa), color = "darkgreen") +
+  geom_line(data = data.frame(Days.Since.Origin.sa = seq_days.sa, Temp.sa = predicted_temp.sa),
+            aes(x = as.Date(start.date) + Days.Since.Origin.sa, y = Temp.sa), color = "darkgreen", lwd = 1) +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  ylab(expression(paste("Temperature (", degree, "C)"))) +
+  xlab("") +
+  geom_text(aes(x = as.Date(start.date) + max(df$Days.Since.Origin), y = max(df$Temp), label = "ALGR"),
+            color = "purple", hjust = 2, vjust = 26) +
+  geom_text(aes(x = as.Date(start.date) + max(df.gh$Days.Since.Origin.gh), y = max(df.gh$Temp.gh), label = "GHAN"),
+                color = "darkred", hjust = 2, vjust = 2.5) +
+  geom_text(aes(x = as.Date(start.date) + max(df.kenya$Days.Since.Origin.kenya), y = max(df.kenya$Temp.kenya), label = "KENY"),
+            color = "orange", hjust = 2, vjust = 1) +
+  geom_text(aes(x = as.Date(start.date) + max(df.sa$Days.Since.Origin.sa), y = max(df.sa$Temp.sa), label = "SA"),
+            color = "darkgreen", hjust = 11, vjust = 10) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12)
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_blank()
+  )
+
+plot_temp <- plot_temp +
+  coord_cartesian(ylim = c(0, 33))
+  
+
+plot_temp
+#ggsave(plot_temp, filename = "weather.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+## This chunk is same and produces figure as above but texts and labels are made bigger for presentation slides
+
+```{r}
+# This is same as above but without the R-squared values. We instead place the names of the locations on the plots
+
+# Combined plot for the different regions
+plot_temp <- ggplot() +
+  geom_point(data = df.gh, aes(x = Date.gh, y = Temp.gh), color = "darkred") +
+  geom_line(data = data.frame(Days.Since.Origin.gh = seq_days.gh, Temp.gh = predicted_temp.gh),
+            aes(x = as.Date(start.date) + Days.Since.Origin.gh, y = Temp.gh), color = "darkred", lwd = 1.2) +
+  geom_point(data = df, aes(x = Date, y = Temp), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days, Temp = predicted_temp),
+            aes(x = as.Date(start.date) + Days.Since.Origin, y = Temp), color = "purple", lwd = 1.2) +
+  geom_point(data = df.kenya, aes(x = Date.kenya, y = Temp.kenya), color = "orange") +
+  geom_line(data = data.frame(Days.Since.Origin.kenya = seq_days.kenya, Temp.kenya = predicted_temp.kenya),
+            aes(x = as.Date(start.date) + Days.Since.Origin.kenya, y = Temp.kenya), color = "orange", lwd = 1.2) +
+  geom_point(data = df.sa, aes(x = Date.sa, y = Temp.sa), color = "darkgreen") +
+  geom_line(data = data.frame(Days.Since.Origin.sa = seq_days.sa, Temp.sa = predicted_temp.sa),
+            aes(x = as.Date(start.date) + Days.Since.Origin.sa, y = Temp.sa), color = "darkgreen", lwd = 1.2) +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  ylab(expression(paste("Temperature (", degree, "C)"))) +
+  xlab("") +
+  geom_text(aes(x = as.Date(start.date) + max(df$Days.Since.Origin), y = max(df$Temp), label = "ALGR"),
+            color = "purple", hjust = 2, vjust = 26) +
+  geom_text(aes(x = as.Date(start.date) + max(df.gh$Days.Since.Origin.gh), y = max(df.gh$Temp.gh), label = "GHAN"),
+                color = "darkred", hjust = 2, vjust = 2.5) +
+  geom_text(aes(x = as.Date(start.date) + max(df.kenya$Days.Since.Origin.kenya), y = max(df.kenya$Temp.kenya), label = "KENY"),
+            color = "orange", hjust = 2, vjust = 1) +
+  geom_text(aes(x = as.Date(start.date) + max(df.sa$Days.Since.Origin.sa), y = max(df.sa$Temp.sa), label = "SA"),
+            color = "darkgreen", hjust = 11, vjust = 10) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 14, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 14),
+    text = element_text(size = 16)
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_blank()
+  )
+
+plot_temp2 <- plot_temp +
+  coord_cartesian(ylim = c(0, 33))
+  
+
+plot_temp2
+#ggsave(plot_temp2, filename = "weather2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+## Rainfall Data 
+
+```{r}
+# Rainfall data and plots for Algeria
+
+
+# Data
+df.alg <- read.table(text = 
+                       "Date           rainfall
+                      2020-01-01      30.7       
+                      2020-02-01      25.2          
+                      2020-03-01      39.3
+                      2020-04-01      57.4     
+                      2020-05-01      60.7       
+                      2020-06-01      33.7
+                      2020-07-01      14.7   
+                      2020-08-01      30.4     
+                      2020-09-01      61.7
+                      2020-10-01      53.7    
+                      2020-11-01      32.7        
+                      2020-12-01      18.5",
+                     header = TRUE, stringsAsFactors = FALSE)
+
+# Preprocess the data
+df.alg$Date <- as.Date(df.alg$Date)
+start.date <- min(df.alg$Date)
+df.alg$Days.Since.Origin <- as.numeric(df.alg$Date - start.date)
+
+# Define the function
+rain.func <- function(t, a, b, omega, theta) a * (1 + b * cos(2 * pi * (omega * t + theta) / 365))
+
+# Fitting the function to the data
+fit.alg <- nls(rainfall ~ rain.func(Days.Since.Origin, a, b, omega, theta),
+               data = df.alg,
+               start = list(a = 100, b = 0.5, omega = 2, theta = 0))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.alg <- seq(from = min(df.alg$Days.Since.Origin),
+                    to = max(df.alg$Days.Since.Origin),
+                    by = 1)
+
+# Predict rainfall values for the smoother curve
+predicted_rainfall.alg <- predict(fit.alg, newdata = data.frame(Days.Since.Origin = seq_days.alg))
+
+# Calculate R-squared value
+residuals.alg <- df.alg$rainfall - predict(fit.alg)
+ss_residuals.alg <- sum(residuals.alg^2)
+ss_total.alg <- sum((df.alg$rainfall - mean(df.alg$rainfall))^2)
+r_squared.alg <- 1 - (ss_residuals.alg / ss_total.alg)
+
+# Create the plot
+R.algeria <- ggplot() +
+  geom_point(data = df.alg, aes(x = Date, y = rainfall), color = "red") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.alg, rainfall = predicted_rainfall.alg),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "red") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Rainfall") +
+  ggtitle("Rainfall Data and Fitted Function") +
+  geom_text(aes(x = start.date + max(df.alg$Days.Since.Origin), y = max(df.alg$rainfall),
+                label = paste0("R-squared = ", round(r_squared.alg, 2))),
+            color = "red", hjust = 1, vjust = -0.5) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+R.algeria
+```
+
+
+
+```{r}
+# -------------------------------------------------------------------------------
+# Data for average Rainfall (mm) Nairobi, Kenya (East Africa)
+# The data displays rainfall (mm) for the whole year as an average taken from last 12+ years of historical data for Nairobi
+
+# Converting it to daily data
+df.kenya <- read.table(text = 
+                         "Date           rain
+2020-01-01      66.3       
+2020-02-01      85.1          
+2020-03-01      111.9
+2020-04-01      260    
+2020-05-01      197.8       
+2020-06-01      118.6
+2020-07-01      66.5  
+2020-08-01      68.7     
+2020-09-01      69.9
+2020-10-01      105.7    
+2020-11-01      155.4       
+2020-12-01      108.7",
+                       header = TRUE, stringsAsFactors = FALSE)
+
+# Preprocess the data
+df.kenya$Date <- as.Date(df.kenya$Date)
+start.date <- min(df.kenya$Date)
+df.kenya$Days.Since.Origin <- as.numeric(df.kenya$Date - start.date)
+
+# Define the function
+rain.func <- function(t, a, b, omega, theta) a * (1 + b * cos(2 * pi * (omega * t + theta) / 365))
+
+# Fitting the function to the data
+fit.kenya <- nls(rain ~ rain.func(Days.Since.Origin, a, b, omega, theta),
+                 data = df.kenya,
+                 start = list(a = 100, b = 0.5, omega = 2, theta = 0))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.kenya <- seq(from = min(df.kenya$Days.Since.Origin),
+                      to = max(df.kenya$Days.Since.Origin),
+                      by = 1)
+
+# Predict temperature values for the smoother curve
+predicted_rain.kenya <- predict(fit.kenya, newdata = data.frame(Days.Since.Origin = seq_days.kenya))
+
+# Calculate R-squared value
+residuals.kenya <- df.kenya$rain - predict(fit.kenya)
+ss_residuals.kenya <- sum(residuals.kenya^2)
+ss_total.kenya <- sum((df.kenya$rain - mean(df.kenya$rain))^2)
+r_squared.kenya <- 1 - (ss_residuals.kenya / ss_total.kenya)
+
+# Create the plot
+R.kenya <- ggplot() +
+  geom_point(data = df.kenya, aes(x = Date, y = rain), color = "blue") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.kenya, rain = predicted_rain.kenya),
+            aes(x = start.date + Days.Since.Origin, y = rain), color = "blue") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Rainfall") +
+  ggtitle("Rainfall Data and Fitted Function") +
+  geom_text(aes(x = start.date + max(df.kenya$Days.Since.Origin), y = max(df.kenya$rain),
+                label = paste0("R-squared = ", round(r_squared.kenya, 2))),
+            color = "blue", hjust = 1, vjust = -0.2) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+R.kenya
+```
+
+
+
+```{r}
+# -------------------------------------------------------------------------------
+# Data for average Rainfall (mm) Cape Town, South Africa (Southern Africa)
+# The data displays rainfall (mm) for the whole year as an average taken from last 12+ years of historical data for Cape Town
+
+# Data
+df.sa <- read.table(text = 
+                      "Date           rainfall
+                      2020-01-01      19.3       
+                      2020-02-01      14.9          
+                      2020-03-01      28.4
+                      2020-04-01      64.6    
+                      2020-05-01      115       
+                      2020-06-01      201.9
+                      2020-07-01      125  
+                      2020-08-01      149.5     
+                      2020-09-01      79.3
+                      2020-10-01      49.4    
+                      2020-11-01      45.6       
+                      2020-12-01      26.2",
+                    header = TRUE, stringsAsFactors = FALSE)
+
+# Preprocess the data
+df.sa$Date <- as.Date(df.sa$Date)
+start.date <- min(df.sa$Date)
+df.sa$Days.Since.Origin <- as.numeric(df.sa$Date - start.date)
+
+# Define the function
+rain.func <- function(t, a, b, omega, theta) a * (1 + b * cos(2 * pi * (omega * t + theta) / 365))
+
+# Fitting the function to the data
+fit.sa <- nls(rainfall ~ rain.func(Days.Since.Origin, a, b, omega, theta),
+              data = df.sa,
+              start = list(a = 100, b = 0.5, omega = 2, theta = 0))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.sa <- seq(from = min(df.sa$Days.Since.Origin),
+                   to = max(df.sa$Days.Since.Origin),
+                   by = 1)
+
+# Predict rainfall values for the smoother curve
+predicted_rainfall.sa <- predict(fit.sa, newdata = data.frame(Days.Since.Origin = seq_days.sa))
+
+# Calculate R-squared value
+residuals.sa <- df.sa$rainfall - predict(fit.sa)
+ss_residuals.sa <- sum(residuals.sa^2)
+ss_total.sa <- sum((df.sa$rainfall - mean(df.sa$rainfall))^2)
+r_squared.sa <- 1 - (ss_residuals.sa / ss_total.sa)
+
+# Create the plot
+R.sa <- ggplot() +
+  geom_point(data = df.sa, aes(x = Date, y = rainfall), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.sa, rainfall = predicted_rainfall.sa),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "purple") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Rainfall") +
+  ggtitle("Rainfall Data and Fitted Function") +
+  geom_text(aes(x = start.date + max(df.sa$Days.Since.Origin), y = max(df.sa$rainfall),
+                label = paste0("R-squared = ", round(r_squared.sa, 2))),
+            color = "purple", hjust = 1, vjust = -0.5) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+R.sa
+
+```
+
+
+```{r}
+## -------------------------------------------------------------------------------
+# Data for average Rainfall (mm) Kumasi, Ghana (West Africa)
+# The data displays rainfall (mm) for the whole year as an average taken from last 12+ years of historical data for Kumasi
+
+# This data is obtained from (https://www.worldweatheronline.com/kumasi-weather-averages/ashanti/gh.aspx)
+
+# Data
+df.gh <- read.table(text = 
+                      "Date           rainfall
+                      2020-01-01      23.5       
+                      2020-02-01      82.2          
+                      2020-03-01      208.9
+                      2020-04-01      233.4     
+                      2020-05-01      230.9      
+                      2020-06-01      305.2
+                      2020-07-01      246.5  
+                      2020-08-01      214.8    
+                      2020-09-01      352
+                      2020-10-01      314.7    
+                      2020-11-01      104.7       
+                      2020-12-01      26.9",
+                    header = TRUE, stringsAsFactors = FALSE)
+
+# Preprocess the data
+df.gh$Date <- as.Date(df.gh$Date)
+start.date <- min(df.gh$Date)
+df.gh$Days.Since.Origin <- as.numeric(df.gh$Date - start.date)
+
+# Define the function
+rain.func2 <- function(t, a, b1, b2) {
+  a + b1 * sin(2 * pi * t / 365) + b2 * cos(2 * pi * t / 365)
+}
+
+# Fitting the function to the data
+fit.gh <- nls(rainfall ~ rain.func2(Days.Since.Origin, a, b1, b2),
+              data = df.gh,
+              start = list(a = 100, b1 = 100, b2 = 100))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.gh <- seq(from = min(df.gh$Days.Since.Origin),
+                   to = max(df.gh$Days.Since.Origin),
+                   by = 1)
+
+# Predict rainfall values for the smoother curve
+predicted_rainfall.gh <- predict(fit.gh, newdata = data.frame(Days.Since.Origin = seq_days.gh))
+
+# Calculate R-squared value
+residuals.gh <- df.gh$rainfall - predict(fit.gh)
+ss_residuals.gh <- sum(residuals.gh^2)
+ss_total.gh <- sum((df.gh$rainfall - mean(df.gh$rainfall))^2)
+r_squared.gh <- 1 - (ss_residuals.gh / ss_total.gh)
+
+# Create the plot
+R.ghana <- ggplot() +
+  geom_point(data = df.gh, aes(x = Date, y = rainfall), color = "green") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.gh, rainfall = predicted_rainfall.gh),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "green") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Rainfall") +
+  ggtitle("Rainfall Data and Fitted Function") +
+  geom_text(aes(x = start.date + max(df.gh$Days.Since.Origin), y = max(df.gh$rainfall),
+                label = paste0("R-squared = ", round(r_squared.gh, 2))),
+            color = "green", hjust = 1, vjust = -0.2) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+R.ghana
+
+```
+
+
+```{r}
+# -------------------------------------------------------------------------------
+# Data for average Rainfall (mm) Cape Town, South Africa (Southern Africa)
+# The data displays rainfall (mm) for the whole year as an average taken from last 12+ years of historical data for Cape Town
+
+# Data
+df.sa <- read.table(text = 
+                      "Date           rainfall
+                      2020-01-01      19.3       
+                      2020-02-01      14.9          
+                      2020-03-01      28.4
+                      2020-04-01      64.6    
+                      2020-05-01      115       
+                      2020-06-01      201.9
+                      2020-07-01      125  
+                      2020-08-01      149.5     
+                      2020-09-01      79.3
+                      2020-10-01      49.4    
+                      2020-11-01      45.6       
+                      2020-12-01      26.2",
+                    header = TRUE, stringsAsFactors = FALSE)
+
+# Preprocess the data
+df.sa$Date <- as.Date(df.sa$Date)
+start.date <- min(df.sa$Date)
+df.sa$Days.Since.Origin <- as.numeric(df.sa$Date - start.date)
+
+# Define the function
+rain.func <- function(t, a, b, omega, theta) a * (1 + b * cos(2 * pi * (omega * t + theta) / 365))
+
+# Fitting the function to the data
+fit.sa <- nls(rainfall ~ rain.func(Days.Since.Origin, a, b, omega, theta),
+              data = df.sa,
+              start = list(a = 100, b = 0.5, omega = 2, theta = 0))
+
+# Generate a denser sequence of days for smoother curve
+seq_days.sa <- seq(from = min(df.sa$Days.Since.Origin),
+                   to = max(df.sa$Days.Since.Origin),
+                   by = 1)
+
+# Predict rainfall values for the smoother curve
+predicted_rainfall.sa <- predict(fit.sa, newdata = data.frame(Days.Since.Origin = seq_days.sa))
+
+# Calculate R-squared value
+residuals.sa <- df.sa$rainfall - predict(fit.sa)
+ss_residuals.sa <- sum(residuals.sa^2)
+ss_total.sa <- sum((df.sa$rainfall - mean(df.sa$rainfall))^2)
+r_squared.sa <- 1 - (ss_residuals.sa / ss_total.sa)
+
+# Create the plot
+R.sa <- ggplot() +
+  geom_point(data = df.sa, aes(x = Date, y = rainfall), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.sa, rainfall = predicted_rainfall.sa),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "purple") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "Date", y = "Rainfall") +
+  ggtitle("Rainfall Data and Fitted Function") +
+  geom_text(aes(x = start.date + max(df.sa$Days.Since.Origin), y = max(df.sa$rainfall),
+                label = paste0("R-squared = ", round(r_squared.sa, 2))),
+            color = "purple", hjust = 1, vjust = -0.5) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_blank())
+
+R.sa
+
+```
+
+
+```{r}
+# Rain data plot for all the regions considered
+
+ggplot() +
+  geom_point(data = df.alg, aes(x = Date, y = rainfall), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.alg, rainfall = predicted_rainfall.alg),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "purple") +
+  geom_point(data = df.kenya, aes(x = Date, y = rain), color = "orange") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.kenya, rain = predicted_rain.kenya),
+            aes(x = start.date + Days.Since.Origin, y = rain), color = "orange") +
+  geom_point(data = df.sa, aes(x = Date, y = rainfall), color = "darkgreen") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.sa, rainfall = predicted_rainfall.sa),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "darkgreen") +
+  geom_point(data = df.gh, aes(x = Date, y = rainfall), color = "darkred") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.gh, rainfall = predicted_rainfall.gh),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "darkred") +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "", y = "Rainfall (mm)") +
+  geom_text(aes(x = start.date + max(df.alg$Days.Since.Origin), y = max(df.alg$rainfall),
+                label = paste0("R-squared = ", round(r_squared.alg, 2))),
+            color = "purple", hjust = 0.85, vjust = 0.7) +
+  geom_text(aes(x = start.date + max(df.kenya$Days.Since.Origin), y = max(df.kenya$rain),
+                label = paste0("R-squared = ", round(r_squared.kenya, 2))),
+            color = "orange", hjust = 1, vjust = 10) +
+  geom_text(aes(x = start.date + max(df.sa$Days.Since.Origin), y = max(df.sa$rainfall),
+                label = paste0("R-squared = ", round(r_squared.sa, 2))),
+            color = "darkgreen", hjust = 1, vjust = 24) +
+  geom_text(aes(x = start.date + max(df.gh$Days.Since.Origin), y = max(df.gh$rainfall),
+                label = paste0("R-squared = ", round(r_squared.gh, 2))),
+            color = "darkred", hjust = 1.3, vjust = 8) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12)
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_blank())# Increase tick labels size to 18
+
+```
+
+
+This chunk does same as above chunk but we put the names of regions on the graph istead of the R-squared values
+```{r}
+# Combined figures in one plot 
+plot_rain2 <- ggplot() +
+  geom_point(data = df.alg, aes(x = Date, y = rainfall), color = "purple") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.alg, rainfall = predicted_rainfall.alg),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "purple", lwd = 1.2) +
+  geom_point(data = df.kenya, aes(x = Date, y = rain), color = "orange") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.kenya, rain = predicted_rain.kenya),
+            aes(x = start.date + Days.Since.Origin, y = rain), color = "orange", lwd = 1.2) +
+  geom_point(data = df.sa, aes(x = Date, y = rainfall), color = "darkgreen") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.sa, rainfall = predicted_rainfall.sa),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "darkgreen", lwd = 1.2) +
+  geom_point(data = df.gh, aes(x = Date, y = rainfall), color = "darkred") +
+  geom_line(data = data.frame(Days.Since.Origin = seq_days.gh, rainfall = predicted_rainfall.gh),
+            aes(x = start.date + Days.Since.Origin, y = rainfall), color = "darkred", lwd = 1.2) +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(x = "", y = "Rainfall (mm)") +
+  geom_text(aes(x = start.date + max(df.alg$Days.Since.Origin), y = max(df.alg$rainfall), label = "ALGR"),
+            color = "purple", hjust = 5, vjust = 3) +
+  geom_text(aes(x = start.date + max(df.kenya$Days.Since.Origin), y = max(df.kenya$rain), label = "KENY"),
+            color = "orange", hjust = 1.5, vjust = 7) +
+  geom_text(aes(x = start.date + max(df.sa$Days.Since.Origin), y = max(df.sa$rainfall), label = "SA"),
+            color = "darkgreen", hjust = 10, vjust = 7) +
+  geom_text(aes(x = start.date + max(df.gh$Days.Since.Origin), y = max(df.gh$rainfall), label = "GHAN"),
+            color = "darkred", hjust = 3.5, vjust = 8) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 14, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 14),
+    text = element_text(size = 16)
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_blank())# Increase tick labels size to 18
+
+
+plot_rain2
+
+#ggsave(plot_rain2, filename = "rain2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, fig.height=15, fig.width=25}
+library(ggplot2)
+library(cowplot)
+library(magick)
+
+# Load your saved figures
+# Load your saved figures
+
+plot_temp <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/weather.png", scale = 1)
+plot_rain <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/rain.png", scale = 1)
+plot_other <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/map.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_temp <- plot_temp + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14, fontface = "bold") # Here the font is bold 
+numbered_plot_other <- plot_other + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14, fontface = "bold") # Here the font is bold 
+numbered_plot_rain <- plot_rain + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14, fontface = "bold") # Here the font is bold 
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_temp, 
+  numbered_plot_other, 
+  numbered_plot_rain, 
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "weather_combined2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+```{r, warning=FALSE, message=FALSE, fig.height=15, fig.width=25}
+x <- plot_grid(plot_temp, plot_rain, ncol = 1, labels = c("(a)", "(c)"), align = "hv", label_size = 20)
+y <- plot_grid(plot_other, ncol = 1, labels = c("(b)"), align = "hv",scale = 1.8, label_size = 20)
+xy <- plot_grid(x,y, ncol = 2, rel_heights = c(1,1,1), labels = c(""))
+xy
+```
+
+
+# This chunk produces same results as the previous two chunks but makes the figures bold for presentations
+
+```{r, warning=FALSE, message=FALSE, fig.height=15, fig.width=25}
+# Assuming you have ggplot2, cowplot, and magick installed
+# If not, install them using install.packages("ggplot2"), install.packages("cowplot"), and install.packages("magick")
+
+library(ggplot2)
+library(cowplot)
+library(magick)
+
+# Load your saved figures
+# Load your saved figures
+
+plot_temp <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/weather2.png", scale = 1)
+plot_rain <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/rain2.png", scale = 1)
+plot_other <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/map.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_temp <- plot_temp + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14, fontface = "bold") # Here the font is bold 
+numbered_plot_other <- plot_other + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14, fontface = "bold") # Here the font is bold 
+numbered_plot_rain <- plot_rain + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14, fontface = "bold") # Here the font is bold 
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_temp, 
+  numbered_plot_other, 
+  numbered_plot_rain, 
+  ncol = 2
+)
+
+#ggsave(combined_plot, filename = "weather_combined2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+x <- plot_grid(plot_temp, plot_rain, ncol = 1, labels = c("(a)", "(c)"), align = "hv", label_size = 20)
+y <- plot_grid(plot_other, ncol = 1, labels = c("(b)"), align = "hv",scale = 1.8, label_size = 20)
+xy <- plot_grid(x,y, ncol = 2, rel_heights = c(1,1,1), labels = c(""))
+xy
+
+```
+
+
+
+
+```{r}
+library(ggplot2)
+library(cowplot)
+library(magick)
+
+# Load your saved figures
+# Load your saved figures
+
+plot_temp <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/weather.png", scale = 1)
+plot_rain <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/rain.png", scale = 1)
+plot_other <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/map.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_temp <- plot_temp + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14) # Here the font normal
+numbered_plot_other <- plot_other + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_rain <- plot_rain + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_temp, 
+  numbered_plot_other, 
+  numbered_plot_rain, 
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "weather_combined3.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+```
+
+
+
+
+
+
+
+
+

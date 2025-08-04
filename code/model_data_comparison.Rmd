@@ -1,0 +1,749 @@
+---
+title: "Comparing Death Data to Model Simulations"
+author: "jbaafi"
+date: "2024-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Including Plots
+
+```{r}
+# Load needed packages
+pacman::p_load(ggplot2, dplyr)
+```
+
+### Load Data 
+
+```{r}
+# Load data from our world in data website
+malaria_deaths <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/malaria and mosquito data/malaria-deaths-by-region.csv")
+```
+
+
+### Malaria related death data for Ghana
+
+```{r}
+# Extract death data for Ghana
+gh.malaria.deaths <- malaria_deaths %>% 
+  filter(Entity == "Ghana")
+
+# Create a basic ggplot for Ghana death data
+ggplot(gh.malaria.deaths, aes(x = Year, y = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.)) +
+  #geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Malaria deaths in Ghana",
+       x = "Year",
+       y = "Annual number of deaths") +
+  theme_bw()
+```
+
+```{r}
+# Simulated data
+ghana <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+# Create a basic ggplot for ghana simulated population
+ggplot(ghana, aes(x = time, y = vary.total.adults)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Numerical simulation of model",
+       x = "Time",
+       y = "Abundance") +
+  theme_bw()
+```
+
+
+```{r}
+# Extract the month and year information from the time column. Then, calculate the monthly percentages considering data from all five years:
+ghana2 <- ghana %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2015-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2015-01-01"), "%m"))) %>%
+  group_by(year, month) 
+
+ghana3 <- ghana2 %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(vary.total.adults))
+
+ggplot(ghana3, aes(x = year, y = yearly_total)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue", width = 0.3, alpha = 0.5) +
+  ylab("Yearly Total Mosquitoes") +
+  xlab("Year") +
+  ggtitle("Yearly Total Adult Mosquitoes") +
+  theme_bw()
+
+```
+
+```{r}
+#Subset death data for Ghana (2015-2019)
+gh.subset.death <- gh.malaria.deaths %>% 
+  filter(Year >= "2015")
+
+#ghana3 # Simulated data
+gh.simulated <- ghana3 %>% 
+  rename(Year = year)
+
+# Combine data
+gh.combined <- inner_join(gh.subset.death, gh.simulated)
+
+# Data from previous chunk
+df <- gh.combined
+
+df <- df %>% 
+  rename(year = Year,
+         malaria.deaths = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.,
+         simulated.abundance = yearly_total)
+
+# Define limits to both axis
+ylim.prim <- c(0, 289900)   # in this example, model
+ylim.sec <- c(20000, 25300)    #in this example, deaths
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+ggplot(df, aes(year)) +
+  geom_bar(aes(y = simulated.abundance), stat = "identity", fill = "skyblue", color = "lightblue", width = 0.25, alpha = 0.5) +
+  geom_point(aes(y = a + malaria.deaths*b), color = "red", size = 2.5) +
+  scale_y_continuous(bquote("Mosquitoes abundance" ~ (x ~ 10^5)), breaks = seq(0, 5, 1) * 1e5, labels = seq(0, 5, 1), sec.axis = sec_axis(~ (. - a)/b, name = bquote("Malaria deaths" ~ (x ~ 10^3)), breaks = seq(20, 26, 2) * 1e3, labels = seq(20, 26, 2))) +
+  scale_x_continuous("Year") +
+  theme_classic() +  # Add theme_minimal()
+  theme(
+    axis.line.y.left = element_line(color = "skyblue"), 
+    axis.ticks.y.left = element_line(color = "skyblue"),
+    axis.text.y.left = element_text(color = "skyblue"), 
+    axis.title.y.left = element_text(color = "skyblue"),
+    axis.line.y.right = element_line(color = "red"), 
+    axis.ticks.y.right = element_line(color = "red"),
+    axis.text.y.right = element_text(color = "red"), 
+    axis.title.y.right = element_text(color = "red"),
+    axis.line.x = element_line(color = "black"),
+    panel.background = element_rect(fill = "white"),  # Set background color to white
+    plot.background = element_rect(fill = "white")  # Set plot background color to white
+  ) +
+  ggtitle("Comparing Model to Data")
+
+```
+
+
+```{r}
+# Specify the length of the vertical line for each year
+vertical_line_lengths <- data.frame(year = unique(df$year), length = c(24337, 22171, 20533, 21907, 21597))
+
+# Plot the figure
+gh_compare_death_model_data <- ggplot(df, aes(year)) +
+  geom_bar(aes(y = simulated.abundance), stat = "identity", fill = "darkblue", color = "darkblue", width = 0.25, alpha = 0.5) +
+  geom_point(aes(y = a + malaria.deaths * b), color = "red", size = 3) +
+  scale_y_continuous(bquote("Mosquito abundance" ~ (x ~ 10^5)), breaks = seq(0, 5, 1) * 1e5, labels = seq(0, 5, 1), sec.axis = sec_axis(~ (. - a)/b, name = bquote("Malaria deaths" ~ (x ~ 10^3)), breaks = seq(20, 26, 2) * 1e3, labels = seq(20, 26, 2))) +
+  scale_x_continuous("Year") +
+  
+  # Add vertical lines for each year with lengths determined by the second y-axis
+  geom_segment(data = vertical_line_lengths,
+               aes(x = year, y = 0, xend = year, yend = length * b + a),
+               linetype = "dashed", color = "red", alpha = 0.75) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 13)
+  ) +
+  theme(axis.line.y.left = element_line(color = "darkblue"), 
+        axis.ticks.y.left = element_line(color = "darkblue"),
+        axis.text.y.left = element_text(color = "darkblue"), 
+        axis.title.y.left = element_text(color = "darkblue"),
+        axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red"),
+        axis.line.x = element_line(color = "black")
+  ) +
+  ggtitle("Ghana") +
+  theme(plot.title = element_text(hjust = 0.5, size = 13))
+  
+
+gh_compare_death_model_data
+
+#ggsave(gh_compare_death_model_data, filename = "death_and_model_gh.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+In the next few chunks, I will be comparing the model for the other three regions with human death due to malaria in those regions. 
+
+### Kenya
+
+```{r}
+# Extract death data for Kenya
+kenya.malaria.deaths <- malaria_deaths %>% 
+  filter(Entity == "Kenya")
+
+# Create a basic ggplot for Kenya death data
+ggplot(kenya.malaria.deaths, aes(x = Year, y = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Malaria deaths in Ghana",
+       x = "Year",
+       y = "Annual number of deaths") +
+  theme_bw()
+```
+
+```{r}
+# Simulated data from the model
+kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+
+# Create a basic ggplot for kenya simulated population
+ggplot(kenya, aes(x = time, y = vary.total.adults)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Numerical simulation of model",
+       x = "Time",
+       y = "Abundance") +
+  theme_bw()
+```
+
+
+```{r}
+# Extract the month and year information from the time column. Then, calculate the yearly totals for five years:
+kenya.yearly.total <- kenya %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2015-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2015-01-01"), "%m"))) %>%
+  group_by(year, month) 
+
+# Calculate total adult mosquitoes for each year
+kenya.yearly.total <- kenya.yearly.total %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(vary.total.adults))
+
+# Produce a plot
+ggplot(kenya.yearly.total, aes(x = year, y = yearly_total)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue", width = 0.25, alpha = 0.7) +
+  ylab("Total adult mosquitoes") +
+  xlab("Year") +
+  ggtitle("Yearly Total Adult Mosquitoes for Kenya") +
+  theme_bw()
+
+```
+
+```{r}
+#Subset death data for Kenya (2015-2019)
+kenya.malaria.deaths <- kenya.malaria.deaths %>% 
+  filter(Year >= "2015")
+
+# Rename column to match the other data frame to allow for merging
+kenya.yearly.total <- kenya.yearly.total %>% 
+  rename(Year = year)
+
+# Combine data
+kenya.combined <- inner_join(kenya.malaria.deaths, kenya.yearly.total)
+
+# Data 
+kenya.df <- kenya.combined %>% 
+  rename(year = Year,
+         malaria.deaths = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.,
+         mosquito.abundance = yearly_total)
+
+# Define limits to both axis
+ylim.prim <- c(0, 93090)   # in this example, model
+ylim.sec <- c(4000, 9090)    #in this example, deaths
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+# Specify the length of the vertical line for each year
+vertical_line_lengths <- data.frame(year = unique(kenya.df$year), length = c(4772, 6138, 7358, 7963, 8049))
+
+# Plot the figure
+kenya_model_data <- ggplot(kenya.df, aes(year)) +
+  geom_bar(aes(y = mosquito.abundance), stat = "identity", fill = "darkblue", color = "darkblue", width = 0.25, alpha = 0.5) +
+  geom_point(aes(y = a + malaria.deaths * b), color = "red", size = 3) +
+  scale_y_continuous(bquote("Mosquito abundance" ~ (x ~ 10^3)), breaks = seq(0, 100, 40) * 1e3, labels = seq(0, 100, 40), sec.axis = sec_axis(~ (. - a)/b, name = bquote("Malaria deaths" ~ (x ~ 10^3)), breaks = seq(0, 12, 2) * 1e3, labels = seq(0, 12, 2))) +
+  scale_x_continuous("Year") +
+  
+  # Add vertical lines for each year with lengths determined by the second y-axis
+  geom_segment(data = vertical_line_lengths,
+               aes(x = year, y = 0, xend = year, yend = length * b + a),
+               linetype = "dashed", color = "red", alpha = 0.75) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 13)
+  ) +
+  theme(axis.line.y.left = element_line(color = "darkblue"), 
+        axis.ticks.y.left = element_line(color = "darkblue"),
+        axis.text.y.left = element_text(color = "darkblue"), 
+        axis.title.y.left = element_text(color = "darkblue"),
+        axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red"),
+        axis.line.x = element_line(color = "black")
+  ) +
+  ggtitle("Kenya")+
+  theme(plot.title = element_text(hjust = 0.5, size = 13))
+
+kenya_model_data
+
+#ggsave(kenya_model_data, filename = "death_and_model_kenya.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+### South Africa
+
+```{r}
+# Extract death data for South Africa
+sa.malaria.deaths <- malaria_deaths %>% 
+  filter(Entity == "South Africa")
+
+# Create a basic ggplot for SA death data
+ggplot(sa.malaria.deaths, aes(x = Year, y = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Malaria deaths in SA",
+       x = "Year",
+       y = "Annual number of deaths") +
+  theme_bw()
+```
+
+```{r}
+# Simulated data from the model
+sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+# Create a basic ggplot for SA simulated population
+ggplot(sa, aes(x = time, y = vary.total.adults)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Numerical simulation of model",
+       x = "Time",
+       y = "Abundance") +
+  theme_bw()
+```
+
+
+```{r}
+# Extract the month and year information from the time column. Then, calculate the yearly totals for five years:
+sa.yearly.total <- sa %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2015-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2015-01-01"), "%m"))) %>%
+  group_by(year, month) 
+
+# Calculate total adult mosquitoes for each year
+sa.yearly.total <- sa.yearly.total %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(vary.total.adults))
+
+# Produce a plot
+ggplot(sa.yearly.total, aes(x = year, y = yearly_total)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue", width = 0.25, alpha = 0.7) +
+  ylab("Total adult mosquitoes") +
+  xlab("Year") +
+  ggtitle("Yearly Total Adult Mosquitoes for South Africa") +
+  theme_bw()
+
+```
+
+
+```{r}
+#Subset death data for Kenya (2015-2019)
+sa.malaria.deaths <- sa.malaria.deaths %>% 
+  filter(Year >= "2015")
+
+# Rename column to match the other data frame to allow for merging
+sa.yearly.total <- sa.yearly.total %>% 
+  rename(Year = year)
+
+# Combine data
+sa.combined <- inner_join(sa.malaria.deaths, sa.yearly.total)
+
+# Data 
+sa.df <- sa.combined %>% 
+  rename(year = Year,
+         malaria.deaths = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.,
+         mosquito.abundance = yearly_total)
+
+# Define limits to both axis
+ylim.prim <- c(0, 15200)   # in this example, model
+ylim.sec <- c(0, 800)    #in this example, deaths
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+# Specify the length of the vertical line for each year
+#vertical_line_lengths <- data.frame(year = unique(kenya.df$year), length = c(4772, 6138, 7358, 7963, 8049))
+vertical_line_lengths <- data.frame(year = unique(kenya.df$year), length = sa.df$malaria.deaths)
+
+# Plot the figure
+model_data_sa <- ggplot(sa.df, aes(year)) +
+  geom_bar(aes(y = mosquito.abundance), stat = "identity", fill = "darkblue", color = "darkblue", width = 0.25, alpha = 0.5) +
+  geom_point(aes(y = a + malaria.deaths * b), color = "red", size = 3) +
+  scale_y_continuous(bquote("Mosquito abundance" ~ (x ~ 10^3)), breaks = seq(0, 20, 5) * 1e3, labels = seq(0, 20, 5), sec.axis = sec_axis(~ (. - a)/b, name = bquote("Malaria deaths" ~ (x ~ 10^2)), breaks = seq(0, 10, 2) * 1e2, labels = seq(0, 10, 2))) +
+  scale_x_continuous("Year") +
+  
+  # Add vertical lines for each year with lengths determined by the second y-axis
+  geom_segment(data = vertical_line_lengths,
+               aes(x = year, y = 0, xend = year, yend = length * b + a),
+               linetype = "dashed", color = "red", alpha = 0.75) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 13)
+  ) +
+  theme(axis.line.y.left = element_line(color = "darkblue"), 
+        axis.ticks.y.left = element_line(color = "darkblue"),
+        axis.text.y.left = element_text(color = "darkblue"), 
+        axis.title.y.left = element_text(color = "darkblue"),
+        axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red"),
+        axis.line.x = element_line(color = "black")
+  ) +
+  ggtitle("South Africa")+
+  theme(plot.title = element_text(hjust = 0.5, size = 13))
+
+model_data_sa
+
+#ggsave(model_data_sa, filename = "death_and_model_sa.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+### Algeria
+
+```{r}
+# Extract death data for Algeria
+algeria.malaria.deaths <- malaria_deaths %>% 
+  filter(Entity == "Algeria")
+
+# Create a basic ggplot for SA death data
+ggplot(algeria.malaria.deaths, aes(x = Year, y = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Malaria deaths in Algeria",
+       x = "Year",
+       y = "Annual number of deaths") +
+  theme_bw()
+```
+
+```{r}
+# Simulated data from the model
+algeria <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+
+# Create a basic ggplot for SA simulated population
+ggplot(algeria, aes(x = time, y = vary.total.adults)) +
+  geom_line() +  # Line plot
+  geom_point(color = "red") +  # Add points
+  labs(title = "Numerical simulation of model",
+       x = "Time",
+       y = "Abundance") +
+  theme_bw()
+```
+
+```{r}
+# Extract the month and year information from the time column. Then, calculate the yearly totals for five years:
+algeria.yearly.total <- algeria %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2015-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2015-01-01"), "%m"))) %>%
+  group_by(year, month) 
+
+# Calculate total adult mosquitoes for each year
+algeria.yearly.total <- algeria.yearly.total %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(vary.total.adults))
+
+# Produce a plot
+ggplot(algeria.yearly.total, aes(x = year, y = yearly_total)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue", width = 0.25, alpha = 0.7) +
+  ylab("Total adult mosquitoes") +
+  xlab("Year") +
+  ggtitle("Yearly Total Adult Mosquitoes for Algeria") +
+  theme_bw()
+
+```
+
+```{r}
+#Subset death data for Kenya (2015-2019)
+algeria.malaria.deaths <- algeria.malaria.deaths %>% 
+  filter(Year >= "2015")
+
+# Rename column to match the other data frame to allow for merging
+algeria.yearly.total <- algeria.yearly.total %>%
+  rename(Year = year)
+
+# Combine data
+algeria.combined <- inner_join(algeria.malaria.deaths, algeria.yearly.total)
+
+
+# Data from previous chunk
+algeria.df <- algeria.combined %>% 
+  rename(year = Year,
+         malaria.deaths = Deaths...Malaria...Sex..Both...Age..All.Ages..Number.,
+         mosquito.abundance = yearly_total)
+
+# Define limits to both axis
+ylim.prim <- c(0, 116280)   # in this example, model
+ylim.sec <- c(0, 5)    #in this example, deaths
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+# Specify the length of the vertical line for each year
+#vertical_line_lengths <- data.frame(year = unique(kenya.df$year), length = c(4772, 6138, 7358, 7963, 8049))
+vertical_line_lengths <- data.frame(year = unique(algeria.df$year), length = algeria.df$malaria.deaths)
+
+# Plot the figure
+model_data_algeria <- ggplot(algeria.df, aes(year)) +
+  geom_bar(aes(y = mosquito.abundance), stat = "identity", fill = "darkblue", color = "darkblue", width = 0.25, alpha = 0.5) +
+  geom_point(aes(y = a + malaria.deaths * b), color = "red", size = 3) +
+  scale_y_continuous(bquote("Mosquito abundance" ~ (x ~ 10^4)), breaks = seq(0, 14, 4) * 1e4, labels = seq(0, 14, 4), sec.axis = sec_axis(~ (. - a)/b, name = "Malaria deaths", breaks = seq(0, 10, 2), labels = seq(0, 10, 2))) +
+  scale_x_continuous("Year") +
+  
+  # Add vertical lines for each year with lengths determined by the second y-axis
+  geom_segment(data = vertical_line_lengths,
+               aes(x = year, y = 0, xend = year, yend = length * b + a),
+               linetype = "dashed", color = "red", alpha = 0.75) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 13)
+  ) +
+  theme(axis.line.y.left = element_line(color = "darkblue"), 
+        axis.ticks.y.left = element_line(color = "darkblue"),
+        axis.text.y.left = element_text(color = "darkblue"), 
+        axis.title.y.left = element_text(color = "darkblue"),
+        axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red"),
+        axis.line.x = element_line(color = "black")
+  ) +
+  ggtitle("Algeria")+
+  theme(plot.title = element_text(hjust = 0.5, size = 13))
+
+model_data_algeria
+
+#ggsave(model_data_algeria, filename = "death_and_model_algeria.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r}
+# Combine all the plots after the break
+library(cowplot)
+library(magick)
+
+# Load your saved figures
+# Load your saved figures
+
+plot_algeria <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/death_and_model_algeria.png", scale = 1)
+plot_sa <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/death_and_model_sa.png", scale = 1)
+plot_kenya <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/death_and_model_kenya.png", scale = 1)
+plot_ghana <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/death_and_model_gh.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_algeria <- plot_algeria + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14) # Here the font normal
+numbered_plot_sa <- plot_sa + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_kenya <- plot_kenya + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_ghana <- plot_ghana+ draw_label("(d)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_algeria, 
+  numbered_plot_sa, 
+  numbered_plot_kenya,
+  numbered_plot_ghana,
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "death_and_model_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+I want to compare the estimated average number of mosquitoes across five years to the average number of malaria deaths for each region.
+
+```{r}
+# Load data from our world in data website
+malaria_deaths <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/malaria and mosquito data/malaria-deaths-by-region.csv")
+
+# Extract death data for each region
+algeria_death_df <- malaria_deaths %>% 
+  filter(Entity == "Algeria") %>% 
+  filter(Year >= "2015")
+
+sa_death_df <- malaria_deaths %>% 
+  filter(Entity == "South Africa")%>% 
+  filter(Year >= "2015")
+
+kenya_death_df <- malaria_deaths %>% 
+  filter(Entity == "Kenya")%>% 
+  filter(Year >= "2015")
+
+ghana_death_df <- malaria_deaths %>% 
+  filter(Entity == "Ghana")%>% 
+  filter(Year >= "2015")
+
+# Number of deaths for each region averaged across five years
+deaths <- data.frame(
+  Region = c("Algeria", "South Africa", "Kenya", "Ghana"),
+  average_deaths = c(mean(algeria_death_df$Deaths...Malaria...Sex..Both...Age..All.Ages..Number.),
+                     mean(sa_death_df$Deaths...Malaria...Sex..Both...Age..All.Ages..Number.),
+                     mean(kenya_death_df$Deaths...Malaria...Sex..Both...Age..All.Ages..Number.),
+                     mean(ghana_death_df$Deaths...Malaria...Sex..Both...Age..All.Ages..Number.))
+  )
+
+# ------------------------------------------------------------------------------------------------------
+# Now I will consider the model estimates as follows
+# ------------------------------------------------------------------------------------------------------
+# Load data from various regions 
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+df.alg <- df.alg %>% 
+  mutate(count = vary.total.adults)
+
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+library(lubridate)
+
+mosquito_data.alg <- df.alg %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+mosquito_data.gh <- df.gh %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+mosquito_data.kenya <- df.kenya %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+mosquito_data.sa <- df.sa %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+
+# Calculate total adults for each region at the final time point
+df_average_mosquito <- data.frame(
+  Region = c("Algeria", "South Africa", "Kenya", "Ghana"),
+  average_count = c(mean(mosquito_data.alg$yearly_total), 
+                    mean(mosquito_data.sa$yearly_total), 
+                    mean(mosquito_data.kenya$yearly_total),
+                    mean(mosquito_data.gh$yearly_total))
+)
+
+
+# --------------------------------------------------------------------------------------------------------
+# Now I will combine data for deaths and estimated number of mosquitoes for each region in one data frame
+# --------------------------------------------------------------------------------------------------------
+
+mosquito_and_death_combined <- inner_join(deaths, df_average_mosquito)
+
+# Melt the data for easier plotting
+melted_data <- reshape2::melt(mosquito_and_death_combined, id.vars = "Region")
+
+
+# Create a grouped bar plot with facets and without legend and facet labels box
+ggplot(melted_data, aes(x = Region, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", width = 0.40) +
+  scale_fill_manual(values = c("average_deaths" = "red", "average_count" = "darkblue"),
+                    labels = c("Average Deaths", "Mosquito Abundance"),
+                    name = "Variable") +
+  labs(title = "",
+       y = "Value") +
+  theme_classic() +
+  facet_wrap(~variable, scales = "free_y", 
+             labeller = labeller(variable = c("average_deaths" = "Empirical Malaria Death Data", "average_count" = "Model Predicted Mosquito Abundance"))) +
+  theme(legend.position = "none",
+        strip.background = element_blank(),  # Remove the facet labels box
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),# Increase font size of axis ticks
+        axis.title = element_text(size = 12),  # Increase font size of axis titles
+        plot.title = element_text(size = 12),  # Increase font size of the plot title
+        strip.text = element_text(size = 12)) +  # Increase font size of facet titles
+
+  # Adding custom labels to the x-axis
+  scale_x_discrete(labels = c("Algeria" = "ALGR",
+                              "Ghana" = "GHAN",
+                              "Kenya" = "KENY",
+                              "South Africa" = "SA")) +
+   # Changing y-axis tick values
+  scale_y_continuous(labels = scales::comma_format())
+
+
+
+malaria_deaths_and_mosquito <- ggplot(melted_data, aes(x = Region, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", width = 0.40) +
+  scale_fill_manual(values = c("average_deaths" = "red", "average_count" = "darkblue"),
+                    labels = c("Average Deaths", "Mosquito Abundance"),
+                    name = "Variable") +
+  labs(title = "",
+       y = bquote("Value" ~ (x ~ 10^3))) +
+  theme_classic() +
+  facet_wrap(~variable, scales = "free_y", 
+             labeller = labeller(variable = c("average_deaths" = "Empirical Malaria Death Data", "average_count" = "Model Predicted Mosquito Abundance"))) +
+  theme(legend.position = "none",
+        strip.background = element_blank(),  # Remove the facet labels box
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 11), # Increase font size of axis ticks
+        axis.title = element_text(size = 12),  # Increase font size of axis titles
+        plot.title = element_text(size = 13),  # Increase font size of the plot title
+        strip.text = element_text(size = 12)) +  # Increase font size of facet titles
+  
+  # Adding custom labels to the x-axis
+  scale_x_discrete(labels = c("Algeria" = "ALGR",
+                              "Ghana" = "GHAN",
+                              "Kenya" = "KENY",
+                              "South Africa" = "SA")) +
+  
+  # Changing y-axis tick values
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-3, prefix = ""))
+
+malaria_deaths_and_mosquito
+
+# Save the figure
+#ggsave(malaria_deaths_and_mosquito, filename = "malaria_deaths_and_mosquito.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

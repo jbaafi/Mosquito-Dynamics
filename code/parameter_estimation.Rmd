@@ -1,0 +1,1100 @@
+---
+title: "Model Analysis"
+author: "jbaafi"
+date: "2023-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE) 
+```
+
+
+```{r, echo=FALSE}
+# Clear workspace
+rm(list = ls())
+
+# Set working directory
+#setwd("/Users/jbaafi/Documents/Github/population-model")
+
+# Load packages
+pacman::p_load(pacman, rio, ggplot2, tidyverse, dplyr, patchwork)
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+temp <- seq(5, 40)
+beck <-  0.443111*exp(-((temp - 34.388928)^2)/185.611107) # data was taken from Beck-Johnson et al. 2013
+
+df <- data.frame(temp, ovi = beck)
+
+oviposition <- ggplot(data = df, aes(x = temp, y = ovi)) +
+  geom_line(size = 1) +
+  geom_point() +
+  labs(title = "Egg laying",
+       x = expression("Temperature (" * degree * "C)"), # Include degree Celsius symbol
+       y = "Egg laying rate (per day)") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 13, angle = 0,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 13),
+        text = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5)) +  # Center the plot title
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 0.5))  # Extend the y-axis
+
+oviposition 
+
+#ggsave(oviposition, filename = "egg_laying_rate.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+```{r, echo=FALSE, message=FALSE}
+temp <- seq(15, 30)
+egg_mortality_gauss <- ifelse(temp <= 15, 0.2415, 
+                              ifelse(temp >= 31, 0.2415, 
+                                     0.0531*exp(((temp - 23)/6.5)^2)))
+
+larva_mortality_gauss <- ifelse(temp <= 15, 0.09597, 
+                                ifelse(temp >= 31, 0.09597, 
+                                       0.0211*exp(((temp - 23)/6.5)^2)))
+
+pupa_mortality_gauss <- ifelse(temp <= 15, 0.2415, 
+                               ifelse(temp >= 31, 0.2415, 
+                                      0.0431*exp(((temp - 23)/6.5)^2)))
+
+adult_mortality <- -log(-0.000828*temp^2 + 0.0367*temp + 0.522)
+
+# Save all data into a dataframe
+df2 <- data.frame(temp, "eggs" = egg_mortality_gauss, 
+                  "larvae" = larva_mortality_gauss, 
+                  "pupae" = pupa_mortality_gauss,
+                  "adult" = adult_mortality)
+
+df2 <- df2 %>% 
+  pivot_longer(cols=c("eggs", "larvae", "pupae", "adult"),
+               names_to='Stage',
+               values_to='rate')
+# Plot data with the fitted function
+mort <- ggplot(data = df2, aes(x=temp, y=rate, col = Stage))+
+  geom_line(size = 1)+
+  geom_point() +
+  xlab(expression("Temperature (" * degree * "C)")) +
+  ylab("Mortality rate (per day)") +
+  ggtitle("Stage specific mortality") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 13, angle = 0,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 13),
+        text = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 0.25))
+
+
+mort
+
+#ggsave(mort, filename = "mortality_rate.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r}
+param <- oviposition + mort
+
+param
+
+#ggsave(param, filename = "parameters_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+temp <- seq(18, 35, length.out = 100)
+R <- seq(15, 60, length.out = 100)
+
+rho_E <- outer(temp, R, function(temp, R) {
+  tauE <- 1.0074 + 6.1694*(1 + (temp/16.6460)^5.8166)^-1  # Average duration spent in egg stage
+  # muE <- ifelse(temp <= 15, 0.2415,
+  #                             ifelse(temp >= 33, 0.5,
+  #                                   0.0451*exp(((temp - 23)/7.0)^2))) # Egg mortality rate
+  muE <- 0.0451*exp(((temp - 23)/7.0)^2)
+  PE.T <- exp(-muE) #   daily  survival  probability  of  mosquito eggs
+  R_IM <- 80  #  The maximum rainfall threshold in the community
+  P_ME <- 0.9 # Peak  daily  survival  probability  of mosquito  eggs
+  PE.R <- R*(R_IM - R)*(4*P_ME / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PE.TR <- PE.T*PE.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  PE.TR/tauE # Development time of eggs
+})
+ 
+filled.contour(temp, R, rho_E, xlab = "Temperature (degrees C)", ylab = "Rainfall (mm)", main = "Egg development rate")
+
+#ggsave("egg_development.png", egg_dev, width = 15, height = 10)
+
+#contour(temp, R, rho_E, xlab = "temp", ylab = "R", main = "Contour Plot of rho_E")
+```
+
+Same graph as above but plotting with `ggplot`
+
+```{r}
+temp <- seq(18, 35, length.out = 200)
+R <- seq(20, 60, length.out = 200) # Rainfall pattern for Ain Mahbel, Algeria
+
+rho_E <- outer(temp, R, function(temp, R) {
+  tauE <- 1.0074 + 6.1694 * (1 + (temp / 16.6460)^5.8166)^-1
+  muE <- 0.0451 * exp(((temp - 23) / 7.0)^2) # Mortality rate as recorded in Beck-Johnson et al
+  #muE <- 1/(1.0074 + 6.1694 * (1 + (temp / 16.6460)^5.8166)^-1) # Mortality rate from Okuneye and Gumel, 2018
+  PE.T <- exp(-muE)
+  R_IM <- 100 # Threshold for Algeria
+  P_ME <- 0.9
+  PE.R <- R * (R_IM - R) * (4 * P_ME / R_IM^2)
+  PE.TR <- PE.T * PE.R
+  #PE.TR / tauE # This gives rates 
+  1 / (PE.TR / tauE)  # Calculate days instead of rates
+})
+
+df <- expand.grid(temp = temp, R = R)
+df$rho_E <- as.vector(rho_E)
+
+# Set y-axis limits
+ylim_min <- 20
+ylim_max <- 60
+
+# Create the plot
+ggplot(df, aes(x = temp, y = R, z = rho_E)) +
+  geom_contour(aes(color = after_stat(level))) +
+  labs(x = "Temperature", y = "R", z = "rho_E") +
+  theme_bw() +
+  #coord_cartesian(ylim = c(ylim_min, ylim_max)) +
+  scale_color_gradient(low = "white", high = "blue")
+
+
+# Create the plot
+dev <- ggplot(df, aes(x = temp, y = R, fill = rho_E)) +
+  geom_tile() +
+  labs(x = expression("Temperature (" * degree * "C)"), 
+       y = "Rainfall (mm)", 
+       title = "Egg development time - Algeria", fill = "Days") +
+  theme_bw() +
+ # coord_cartesian(ylim = c(ylim_min, ylim_max)) +
+  scale_fill_gradient(low = "lightyellow", high = "red") +
+  theme(axis.text.x = element_text(colour = "grey20", size = 13, angle = 0,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 13),
+        text = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+dev
+
+
+ggsave(dev, filename = "egg_development_rate.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+temp <- seq(18, 35, length.out = 100)
+R <- seq(15, 60, length.out = 100) # Rainfall rang for Ain Mahbel, Algeria.
+
+rho_L <- outer(temp, R, function(temp, R) {
+  tauL <- 7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1 # Average duration spent in larvae stage
+  # muL <- ifelse(temp <= 15, 0.09597, 
+  #                             ifelse(temp >= 33, 0.35, 
+  #                                    0.0211*exp(((temp - 23)/6.5)^2))) # Larvae mortality, Beck-Johnson et al, 2013
+  muL <- 0.0211*exp(((temp - 23)/6.5)^2)
+  PL.T <- exp(-muL) #   daily  survival  probability  of immature  mosquitoes  in  larvae stage
+  R_IM <- 80  # This value should be 50mm bigger than the highest value in the data frame. The maximum rainfall threshold in the community
+  P_ML <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PL.R <- R*(R_IM - R)*(4*P_ML / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PL.TR <- PL.T*PL.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE))  # Development rate of larvae to pupae, Okuneye et al., 
+  PL.TR/tauL # Development rate of larvae to pupae Supplemental material by Parham
+})
+ 
+filled.contour(temp, R, rho_L, xlab = "Temperature (degrees C)", ylab = "Rainfall (mm)", main = "Larvae development rate")
+#contour(temp, R, rho_L, xlab = "temp", ylab = "R", main = "Contour Plot of rho_L")
+```
+
+Larvae development function plotted using `ggplot`
+
+```{r, echo=FALSE, message=FALSE}
+rm(list = ls())
+temp <- seq(18, 35, length.out = 200)
+R <- seq(20, 60, length.out = 200)
+
+rho_L <- outer(temp, R, function(temp, R) {
+  tauL <- 7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1 # Average duration spent in larvae stage
+  #muL <- ifelse(temp <= 15, 0.09597, 
+  #                             ifelse(temp >= 33, 0.35, 
+  #                                    0.0211*exp(((temp - 23)/6.5)^2))) # Larvae mortality, Beck-Johnson et al, 2013
+  muL <- 0.0211*exp(((temp - 23)/6.5)^2) # Beck-Johnson data
+  #muL <- 1 / (7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1)
+  PL.T <- exp(-muL) #   daily  survival  probability  of immature  mosquitoes  in  larvae stage
+  R_IM <- 80  # This value should be 50mm bigger than the highest value in the data frame. The maximum rainfall threshold in the community
+  P_ML <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PL.R <- R*(R_IM - R)*(4*P_ML / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PL.TR <- PL.T*PL.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE))  # Development rate of larvae to pupae, Okuneye et al., 
+  #PL.TR/tauL # Development rate of larvae to pupae Supplemental material by Parham
+  1 / (PL.TR/tauL) # Development days (time) instead of rates
+  })
+ 
+
+df <- expand.grid(temp = temp, R = R)
+df$rho_L <- as.vector(rho_L)
+
+# Set y-axis limits
+ylim_min <- 20
+ylim_max <- 60
+
+# Create the plot
+ggplot(df, aes(x = temp, y = R, z = rho_L)) +
+  geom_contour(aes(color = after_stat(level))) +
+  labs(x = "Temperature", y = "R", z = "rho_L") +
+  theme_bw() +
+  #coord_cartesian(ylim = c(ylim_min, ylim_max)) +
+  scale_color_gradient(low = "white", high = "blue")
+
+
+# Create the plot
+dev.larv <- ggplot(df, aes(x = temp, y = R, fill = rho_L)) +
+  geom_tile() +
+  labs(x = expression("Temperature (" * degree * "C)"), 
+       y = "Rainfall (mm)", 
+       title = "Larvae development time - Algeria", fill = "Days") +
+  theme_bw() +
+ # coord_cartesian(ylim = c(ylim_min, ylim_max)) +
+  scale_fill_gradient(low = "lightyellow", high = "red")  +
+  theme(axis.text.x = element_text(colour = "grey20", size = 13, angle = 0,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 13),
+        text = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+dev.larv
+ggsave(dev.larv, filename = "larvae_development_rate.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+temp <- seq(18, 35, length.out = 100)
+R <- seq(15, 60, length.out = 100)
+
+rho_P <- outer(temp, R, function(temp, R) {
+  tauP <- ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1) # Average duration spent in egg stage
+  # muP <- ifelse(temp <= 15, 0.2415, 
+  #                             ifelse(temp >= 33, 0.4, 
+  #                                    0.0411*exp(((temp - 23)/7.2)^2)))
+  muP <- 0.0411*exp(((temp - 23)/7.2)^2)
+  PP.T <- exp(-muP) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  R_IM <- 80  # This value should be 50mm bigger than the highest value in the data frame. The maximum rainfall threshold in the community
+  P_MP <- 0.90 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PP.R <- R*(R_IM - R)*(4*P_MP / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PP.TR <- PP.T*PP.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  PP.TR/tauP
+})
+ 
+filled.contour(temp, R, rho_P, xlab = "Temperature (degrees C)", ylab = "Rainfall (mm)", main = "Pupae development rate")
+#contour(temp, R, rho_P, xlab = "temp", ylab = "R", main = "Contour Plot of rho_L")
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+rm(list = ls())
+temp <- seq(18, 35, length.out = 200)
+R <- seq(20, 60, length.out = 200)
+
+rho_P <- outer(temp, R, function(temp, R) {
+  tauP <- ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1) # Average duration spent in egg stage
+  # muP <- ifelse(temp <= 15, 0.2415, 
+  #                             ifelse(temp >= 33, 0.4, 
+  #                                    0.0411*exp(((temp - 23)/7.2)^2)))
+  muP <- 0.0411*exp(((temp - 23)/7.2)^2)
+  #muP <- 1 / (ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1))
+  PP.T <- exp(-muP) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  R_IM <- 80  # This value should be 50mm bigger than the highest value in the data frame. The maximum rainfall threshold in the community
+  P_MP <- 0.90 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PP.R <- R*(R_IM - R)*(4*P_MP / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PP.TR <- PP.T*PP.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  #PP.TR/tauP
+  1/ (PP.TR/tauP)
+})
+ 
+df <- expand.grid(temp = temp, R = R)
+df$rho_P <- as.vector(rho_P)
+
+# Set y-axis limits
+ylim_min <- 20
+ylim_max <- 60
+
+# Create the plot
+ggplot(df, aes(x = temp, y = R, z = rho_P)) +
+  geom_contour(aes(color = after_stat(level))) +
+  labs(x = "Temperature", y = "R", z = "rho_P") +
+  theme_bw() +
+  #coord_cartesian(ylim = c(ylim_min, ylim_max)) +
+  scale_color_gradient(low = "white", high = "blue")
+
+
+# Create the plot
+dev.pupa <- ggplot(df, aes(x = temp, y = R, fill = rho_P)) +
+  geom_tile() +
+  labs(x = expression("Temperature (" * degree * "C)"), 
+       y = "Rainfall (mm)", 
+       title = "Pupae development time - Algeria", fill = "Days") +
+  theme_bw() +
+ # coord_cartesian(ylim = c(ylim_min, ylim_max)) +
+  scale_fill_gradient(low = "lightyellow", high = "red") +
+  theme(axis.text.x = element_text(colour = "grey20", size = 13, angle = 0,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 13),
+        text = element_text(size = 15),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+dev.pupa
+ggsave(dev.pupa, filename = "pupae_development_rate.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r}
+# Combine all the parameter functions 
+library(cowplot)
+library(magick)
+
+# Load saved figures
+
+plot_laying <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/egg_laying_rate.png", scale = 1)
+plot_mortality <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/mortality_rate.png", scale = 1)
+plot_egg_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/egg_development_rate.png", scale = 1)
+plot_larvae_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larvae_development_rate.png", scale = 1)
+plot_pupae_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/pupae_development_rate.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_laying <- plot_laying + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14) # Here the font normal
+numbered_plot_mortality <- plot_mortality + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_egg_dev <- plot_egg_dev + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_larvae_dev <- plot_larvae_dev + draw_label("(d)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_pupae_dev <- plot_pupae_dev + draw_label("(e)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_laying, 
+  numbered_plot_mortality, 
+  numbered_plot_egg_dev,
+  numbered_plot_larvae_dev,
+  numbered_plot_pupae_dev,
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "parameters_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r}
+library(cowplot)
+
+# Load saved figures
+
+plot_laying <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/egg_laying_rate.png", scale = 1)
+plot_mortality <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/mortality_rate.png", scale = 1)
+plot_egg_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/egg_development_rate.png", scale = 1)
+plot_larvae_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larvae_development_rate.png", scale = 1)
+plot_pupae_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/pupae_development_rate.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_laying <- plot_laying + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14) # Here the font normal
+numbered_plot_mortality <- plot_mortality + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_egg_dev <- plot_egg_dev + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_larvae_dev <- plot_larvae_dev + draw_label("(d)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_pupae_dev <- plot_pupae_dev + draw_label("(e)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+# Create an empty plot to use as a spacer
+spacer <- ggdraw() + theme_void()
+
+# Combine the plots with spacers for gaps
+combined_plot <- plot_grid(
+  numbered_plot_laying, spacer, numbered_plot_mortality, spacer,
+  spacer, spacer, spacer, spacer,  # This row just spacers
+  numbered_plot_egg_dev, spacer, numbered_plot_larvae_dev, spacer,
+  spacer, spacer, spacer, spacer,  # Another spacer row
+  numbered_plot_pupae_dev, NULL, NULL, NULL,  # Last row with one plot
+  ncol = 4, nrow = 5,
+  rel_widths = c(0.5, 0.1, 0.5, 0.1),  # relative widths for plots and horizontal gaps
+  rel_heights = c(0.5, 0.1, 0.5, 0.1, 0.5)  # relative heights for plots and vertical gaps
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "parameters_combined2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+This chunk's plot was not used in the manuscript. We used the one above. 
+
+```{r, warning=FALSE, message=FALSE, fig.height=15, fig.width=25}
+library(magick)
+
+# Load saved figures
+
+plot_laying <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/egg_laying_rate.png", scale = 1)
+plot_mortality <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/mortality_rate.png", scale = 1)
+plot_egg_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/egg_development_rate.png", scale = 1)
+plot_larvae_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larvae_development_rate.png", scale = 1)
+plot_pupae_dev <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/pupae_development_rate.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_laying <- plot_laying + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 29) # Here the font normal
+numbered_plot_mortality <- plot_mortality + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 29)
+numbered_plot_egg_dev <- plot_egg_dev + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 29)
+numbered_plot_larvae_dev <- plot_larvae_dev + draw_label("(d)", x = 0, y = 1, vjust = 1, hjust = 0, size = 29)
+numbered_plot_pupae_dev <- plot_pupae_dev + draw_label("(e)", x = 0, y = 1, vjust = 1, hjust = 0, size = 29)
+
+# Combine the plots with spacers for gaps
+combined_plot <- plot_grid(
+  numbered_plot_laying,
+  numbered_plot_mortality,
+  numbered_plot_egg_dev, 
+  numbered_plot_larvae_dev,
+  numbered_plot_pupae_dev,
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#I will adjust the combined plots a little bit to be alligned much properly
+x <- plot_grid(plot_laying, plot_egg_dev, plot_pupae_dev, ncol = 1, labels = c("(a)", "(c)", "(e)"), align = "hv", label_size = 28)
+y <- plot_grid(plot_mortality, plot_larvae_dev,  ncol = 1, labels = c("(b)", "(d)"), align = "hv", scale = 0.8, label_size = 28)
+xy <- plot_grid(x,y, ncol = 2)
+xy
+
+#ggsave(xy, filename = "parameters_combined_final.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+
+```
+
+
+```{r}
+out <- import("/Users/jbaafi/Documents/Github/population-model/data/df_constant_param.csv")
+
+# select a few columns
+out.larv <- out %>% 
+  select(time, larvae)
+
+# rename columns
+out.larv <- out.larv %>% 
+  rename(
+    x = time,
+    y = larvae
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(out.larv$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+constant <- ggplot(out.larv, aes(x, y)) +
+  geom_line(col = "blue", lwd = 1) +
+  labs(title = "Larvae population",
+       x = "",
+       y = "Number of larvae") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+constant
+
+# Save the plot
+#ggsave("adult_abundance.png", adult, width = 15, height = 10)
+```
+
+
+```{r}
+# Now plot for adult population too
+out.adult <- out %>% 
+  select(time, adults)
+
+out.adult <- out.adult %>% 
+  rename(
+    x = time,
+    y = adults
+  )
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(out.adult$y) * 1.1 
+
+cons.adult <- ggplot(out.adult, aes(x, y)) +
+  geom_line(col = "red", lwd = 1) +
+  labs(title = "Adults population",
+       x = "",
+       y = "Number of adults") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+    coord_cartesian(ylim = c(0, upper_limit))
+
+
+cons.adult
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+cons <- constant / cons.adult
+cons
+# Save the plot
+ggsave("constant_param.png", cons, path = "/Users/jbaafi/Desktop")
+```
+
+
+```{r}
+df.alg <- import("/Users/jbaafi/Documents/Github/population-model/data/df_algeria.csv")
+df.gh <- import("/Users/jbaafi/Documents/Github/population-model/data/df_ghana.csv")
+df.kenya <- import("/Users/jbaafi/Documents/Github/population-model/data/df_kenya.csv")
+df.sa <- import("/Users/jbaafi/Documents/Github/population-model/data/df_SA.csv")
+
+# -----------------------------------------------------------------------------
+# Larval abundance as a function of time for different regions
+
+df <- data.frame(time = df.alg$time, Algeria=df.alg$larvae, Ghana=df.gh$larvae, Kenya=df.kenya$larvae, 
+                 South.Africa=df.sa$larvae)
+
+df <- df[1460:nrow(df), ]
+
+
+
+df <- df %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+# At this point, I will change time on x-axis from days to months
+
+df <- df %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+ggplot(df, aes(x, y, col = Region)) +
+  geom_line()
+
+
+
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+larvae <- ggplot(df, aes(x, y, col = Region)) +
+  geom_line() +
+  labs(title = "Number of Larvae in different regions",
+       x = "Month",
+       y = "Larval abundance") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+
+upper_limit <- max(df$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+larv.abundance <- ggplot(df, aes(x, y, col = Region)) +
+  geom_line(lwd = 1) +
+  labs(title = "Number of Larvae in different regions",
+       x = "",
+       y = "Number of larvae") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 12, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 12),
+    text = element_text(size = 16)
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+larv.abundance
+# Save the plot
+#ggsave("larvae_abundance.png", larv.abundance)
+```
+ 
+
+```{r}
+# Adult abundance on different regions
+
+df2 <- data.frame(time = df.alg$time, Algeria=df.alg$total.adults, Ghana=df.gh$total.adults, Kenya=df.kenya$total.adults, 
+                  South.Africa=df.sa$total.adults)
+
+df2 <- df2[1460:nrow(df2), ]
+
+df2 <- df2 %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+ggp <- ggplot(df2, aes(x=time, y=population, col = Region))+
+  geom_line()+
+  xlab("Time (days)") +
+  ylab("Female adult abundance") +
+  ggtitle("Number of female adult mosquitoes in different regions") +
+  theme_bw()
+
+ggp +                               # Set origin of axes to zero
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+# At this point, I will change time on x-axis from days to months
+
+df2 <- df2 %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df2$y) * 1.1
+
+adult <- ggplot(df2, aes(x, y, col = Region)) +
+  geom_line(lwd = 1) +
+  labs(title = "Number of female adult mosquitoes",
+       x = "",
+       y = "Number of adults") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 14)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+adult
+# Save the plot
+#ggsave("adult_abundance.png", adult, path = "/Users/jbaafi/Desktop")
+```
+
+4. Fraction of population that are adults
+
+```{r}
+
+#####-----------------------------------------------------------------------------
+# Plot fraction of adults
+#####-----------------------------------------------------------------------------
+df.alg <- import("./data/df_algeria.csv")
+df.gh <- import("./data/df_ghana.csv")
+df.kenya <- import("./data/df_kenya.csv")
+df.sa <- import("./data/df_SA.csv")
+
+# Calculate the fraction of adult population at each time point. Algeria data
+total_population <- rowSums(df.alg[,c("eggs", "larvae", "pupae", "total.adults")])
+#fraction_adult <- df.alg[, "total.adults"] / total_population
+
+df.alg <- df.alg %>% 
+  mutate(fraction_adult = total.adults/total_population)
+
+# Ghana data
+total_pop.gh <- rowSums(df.gh[,c("eggs", "larvae", "pupae", "total.adults")])
+
+df.gh <- df.gh %>% 
+  mutate(fraction_adult = total.adults/total_pop.gh)
+
+# Kenya data
+total_pop.kenya <- rowSums(df.kenya[,c("eggs", "larvae", "pupae", "total.adults")])
+
+df.kenya <- df.kenya %>% 
+  mutate(fraction_adult = total.adults/total_pop.kenya)
+
+# SA data
+# Kenya data
+total_pop.SA <- rowSums(df.sa[,c("eggs", "larvae", "pupae", "total.adults")])
+
+df.sa <- df.sa %>% 
+  mutate(fraction_adult = total.adults/total_pop.SA)
+
+
+#-------------------------------------------------------------------------------
+# Plot fraction of population that are adults
+# -----------------------------------------------------------------------------
+frac.adult <- data.frame(time = df.alg$time, Algeria=df.alg$fraction_adult, Ghana=df.gh$fraction_adult, Kenya=df.kenya$fraction_adult, South.Africa=df.sa$fraction_adult)
+
+
+frac.adult <- frac.adult %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+ggp <- ggplot(frac.adult, aes(x=time, y=population, col = Region))+
+  geom_line(size = 1)+
+  xlab("Time (days)") +
+  ylab("Fraction of population") +
+  ggtitle("Fraction of female adults in different regions") +
+  theme_classic()
+
+ggp +                               # Set origin of axes to zero
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+# At this point, I will change time on x-axis from days to months
+
+frac.adult <- frac.adult %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+ggp2 <- ggplot(frac.adult, aes(x, y, col = Region)) +
+  geom_line(size = 1) +
+  labs(title = "Fraction of adult mosquitoes in different regions",
+       x = "",
+       y = "Fraction of adult mosquitoes") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp2
+# Save the plot
+ggsave("fraction_abundance.png", ggp2, path = "/Users/jbaafi/Desktop")
+
+
+###########=----------------------------------------
+# Comparing stage fractions
+# ----------------------------------------
+# Extract the number of mosquitoes in each stage
+E <- df.alg[, "eggs"]
+L <- df.alg[, "larvae"]
+P <- df.alg[, "pupae"]
+A <- df.alg[, "total.adults"]
+
+# Calculate the total number of mosquitoes at each time step
+N <- E + L + P + A
+
+# Calculate the fraction of mosquitoes in each stage
+frac_E <- E/N
+frac_L <- L/N
+frac_P <- P/N
+frac_A <- A/N
+
+df.alg <- df.alg %>% 
+  mutate(frac_E, frac_L, frac_P, frac_A)
+
+
+colors <- c("Larvae" = "blue", "Adult" = "red")
+
+ggp.alg <- ggplot(df.alg, aes(x = time)) +
+  geom_line(aes(y = frac_L, color = "Larvae"), size = 1) +
+  geom_line(aes(y = frac_A, color = "Adult"), size = 1) +
+  labs(x = "",
+       y = "Fraction of population",
+       color = "Legend", 
+       title = "Fraction of population in Algeria") +
+  scale_color_manual(values = colors) +
+  theme_classic()+
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp.alg
+
+#. ---------------------------------
+# Fraction for Ghana
+# ----------------------
+# Extract the number of mosquitoes in each stage
+E <- df.gh[, "eggs"]
+L <- df.gh[, "larvae"]
+P <- df.gh[, "pupae"]
+A <- df.gh[, "total.adults"]
+
+# Calculate the total number of mosquitoes at each time step
+N <- E + L + P + A
+
+# Calculate the fraction of mosquitoes in each stage
+frac_E <- E/N
+frac_L <- L/N
+frac_P <- P/N
+frac_A <- A/N
+
+df.gh <- df.gh %>% 
+  mutate(frac_E, frac_L, frac_P, frac_A)
+
+
+colors <- c("Larvae" = "blue", "Adult" = "red")
+
+ggp.gh <- ggplot(df.gh, aes(x = time)) +
+  geom_line(aes(y = frac_L, color = "Larvae"), size = 1) +
+  geom_line(aes(y = frac_A, color = "Adult"), size = 1) +
+  labs(x = "",
+       y = "Fraction of population",
+       color = "Legend", 
+       title = "Fraction of population in Ghana") +
+  scale_color_manual(values = colors) +
+  theme_classic()+
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp.gh
+
+```
+
+5. Fraction of adult plot 
+
+```{r}
+
+#. ---------------------------------
+# Fraction for Kenya
+# ----------------------
+# Extract the number of mosquitoes in each stage
+E <- df.kenya[, "eggs"]
+L <- df.kenya[, "larvae"]
+P <- df.kenya[, "pupae"]
+A <- df.kenya[, "total.adults"]
+
+# Calculate the total number of mosquitoes at each time step
+N.k <- E + L + P + A
+
+# Calculate the fraction of mosquitoes in each stage
+frac_E <- E/N.k
+frac_L <- L/N.k
+frac_P <- P/N.k
+frac_A <- A/N.k
+
+df.kenya <- df.kenya %>% 
+  mutate(frac_E, frac_L, frac_P, frac_A)
+
+
+colors <- c("Larvae" = "blue", "Adult" = "red")
+
+ggp.kenya <- ggplot(df.kenya, aes(x = time)) +
+  geom_line(aes(y = frac_L, color = "Larvae"), size = 1) +
+  geom_line(aes(y = frac_A, color = "Adult"), size = 1) +
+  labs(x = "",
+       y = "Fraction of population",
+       color = "Legend", 
+       title = "Fraction of population in Kenya") +
+  scale_color_manual(values = colors) +
+  theme_classic()+
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp.kenya
+
+
+#. ---------------------------------
+# Fraction for SA
+# ----------------------
+# Extract the number of mosquitoes in each stage
+E <- df.sa[, "eggs"]
+L <- df.sa[, "larvae"]
+P <- df.sa[, "pupae"]
+A <- df.sa[, "total.adults"]
+
+# Calculate the total number of mosquitoes at each time step
+N.sa <- E + L + P + A
+
+# Calculate the fraction of mosquitoes in each stage
+frac_E <- E/N.sa
+frac_L <- L/N.sa
+frac_P <- P/N.sa
+frac_A <- A/N.sa
+
+df.sa <- df.sa %>% 
+  mutate(frac_E, frac_L, frac_P, frac_A)
+
+
+colors <- c("Larvae" = "blue", "Adult" = "red")
+
+ggp.sa <- ggplot(df.sa, aes(x = time)) +
+  geom_line(aes(y = frac_L, color = "Larvae"), size = 1) +
+  geom_line(aes(y = frac_A, color = "Adult"), size = 1) +
+  labs(x = "",
+       y = "Fraction of population",
+       color = "Legend", 
+       title = "Fraction of population in SA") +
+  scale_color_manual(values = colors) +
+  theme_classic()+
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp.sa
+
+```
+
+
+```{r}
+# Plot fraction of population that are adults
+# I need to work on this code a little bit
+# -----------------------------------------------------------------------------
+frac.adult <- data.frame(time = df.alg$time, Algeria=df.alg$fraction_adult, Ghana=df.gh$fraction_adult, Kenya=df.kenya$fraction_adult, 
+                  South.Africa=df.sa$fraction_adult)
+
+
+frac.adult <- frac.adult %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+ggp <- ggplot(frac.adult, aes(x=time, y=population, col = Region))+
+  geom_line(size = 1)+
+  xlab("Time (days)") +
+  ylab("Female adult abundance") +
+  ggtitle("Number of female adult mosquitoes in different regions") +
+  theme_classic()
+ggp
+
+ggp +                               # Set origin of axes to zero
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+# At this point, I will change time on x-axis from days to months
+
+frac.adult <- frac.adult %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+ggplot(frac.adult, aes(x, y, col = Region)) +
+  geom_line()
+
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+ggp2 <- ggplot(frac.adult, aes(x, y, col = Region)) +
+  geom_line(size = 1) +
+  labs(title = "Fraction of adult mosquitoes in different regions",
+       x = "Month",
+       y = "Fraction of adult mosquitoes") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp2
+```
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,3875 @@
+---
+title: "Figures for adult mosquit abundance under contant and seasonal evironmental conditions"
+author: "jbaafi"
+date: "2023-10-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+# Load required packages
+pacman::p_load(pacman, deSolve, tidyverse, dplyr, rio)
+```
+
+## Plot for Algeria
+
+```{r}
+# Clear workspace
+rm(list = ls())
+
+# Define a function for the system of equations
+pop.model2 <- function(t, y, ...){
+  #temp <- 16.93443 - 4.00834*sin(2*pi*t/365) - 10.50303*cos(2*pi*t/365) # Data from Ain Mahbel, Algeria (North Africa)
+  temp <- 17 #Algeria average temp
+  
+  # Monthly average rainfall 
+  #R <- 40.31070*(1 + 0.50363*cos(2*pi*(2.34109*t - 275.73821)/365)) # Ain Mahbel, Algeria (Northern Africa)
+  R <- 38 #Algeria average rainfall
+  
+  # Oviposition rate as a function of temperature and rainfall based on Abdelrazec and Gumel, 2017
+  #phi_Ao = exp(-0.015*(temp-22)^2)*(1+1.2)*exp(-0.05*(R-10)^2)/(1.2+exp(-0.05*(R-10)^2))
+  
+  # Oviposition rate (genotrophic cycle) as a function of temperature
+  #phi_Ao = exp(-0.015*(temp-22)^2) #  based on Abdelrazec and Gumel, 2017 for Culex mosquitoes
+  
+  phi_Ao <-  0.443111*exp(-((temp - 34.388928)^2)/185.611107) # based on Beck-Johnson et al, 2013 and Lardeux et al, 2008 on Anopheles mosquito
+  
+  #phi_Ao <- ifelse(temp <= 15, 0.3973,  -5.4 + 1.8*temp - 0.2124*temp^2 + 0.01015*temp^3 - 0.0001515*temp^4) # Yang et al, 2009 and Wang & Zou, 2018 for Aedes aegypti
+  
+  # Number of eggs laid per adult female per day (Mordecai et al, 2013, Delatte et al. 2009)
+  #b.func <- -0.153*temp^2 + 8.61*temp - 97.7 # species is Aedes albopictus
+  #b <- ifelse(temp<=16, 0.1, b.func) 
+  
+  # Egg hatching/development function based on Abdelrazec & Gumel, 2017
+  tauE <- 1.0074 + 6.1694*(1 + (temp/16.6460)^5.8166)^-1  # Average duration spent in egg stage
+  mu_E1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2))) # Egg mortality rate
+  PE.T <- exp(-mu_E1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  R_IM <- 90 # For algeria data. The maximum rainfall threshold in the community
+  P_ME <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PE.R <- R*(R_IM - R)*(4*P_ME / R_IM^2) # The rainfall-depende nt daily probability of survival of mosquito eggs
+  PE.TR <- PE.T*PE.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #(PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_E <- PE.TR/tauE
+  
+  # Larvae development rate based on Abdelrazec & Gumel
+  tauL <- 7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1 # Average duration spent in larvae stage
+  mu_L1 <- ifelse(temp <= 15, 0.09597, 
+                  ifelse(temp >= 31, 0.09597, 
+                         0.0211*exp(((temp - 23)/6.5)^2))) # Larvae mortality, Beck-Johnson et al, 2013
+  PL.T <- exp(-mu_L1) #   daily  survival  probability  of immature  mosquitoes  in  larvae stage
+  P_ML <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PL.R <- R*(R_IM - R)*(4*P_ML / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PL.TR <- PL.T*PL.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE))  # Development rate of larvae to pupae, Okuneye et al., 
+  rho_L <- PL.TR/tauL # Development rate of larvae to pupae Supplemental material by Parham
+  
+  # Pupa development rate based on Abdelrazec & Gumel
+  tauP <- ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1) # Average duration spent in egg stage
+  mu_P1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2)))
+  PP.T <- exp(-mu_P1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  P_MP <- 0.90 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PP.R <- R*(R_IM - R)*(4*P_MP / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PP.TR <- PP.T*PP.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_P <- PP.TR/tauP
+  
+  # Adult mortality rate 
+  mu_A <- -log(-0.000828*temp^2 + 0.0367*temp + 0.522) # Taken from Mordecai and Okuneye
+  #mu_A <- 0.0005*(temp - 28)^2 + 0.04 # This is from Abdelrezec & Gumel
+  
+  # The number of states
+  E = y[1]
+  L = y[2]
+  P = y[3]
+  Ah = y[4]
+  Ar = y[5]
+  Ao = y[6]
+  
+  # The system of equations (This model is based on Lutambi et al, 2013)
+  dE <- b*phi_Ao*(1-Ao/K)*Ao - (rho_E + mu_E1 + mu_E2)*E
+  dL <- rho_E*E - (rho_L + mu_L1 + mu_L2 + delta_L*L)*L
+  dP <- rho_L*L - (rho_P + mu_P1 + mu_P2)*P
+  dAh <- rho_P*P + phi_Ao*Ao - (rho_Ah + mu_A + mu_Ah2)*Ah
+  dAr <- rho_Ah*Ah - (rho_Ar + mu_A +mu_Ar2)*Ar
+  dAo <- rho_Ar*Ar - (phi_Ao + mu_A + mu_Ao2)*Ao
+  #return(list(c(dE, dL, dP, dAh, dAr, dAo, temp, R)))
+  return(list(c(dE, dL, dP, dAh, dAr, dAo)))
+}
+
+# Model parameters (All parameter values are based on Lutambi et al, 2013) and adapted to Anopheles species
+b  = 200      # number of eggs laid per oviposition (range  100 - 400 eggs at a time) https://www.canada.ca/en/health-canada/services/pest-control-tips/mosquitoes.html
+mu_E2 = 0.005    # extra natural mortality of eggs that is not dependent on environmental conditions
+mu_L2 = 0.005 # Natural mortality of larvae
+delta_L = 0.01 # For every 100 larvae, 1 larvae will probably die due to competition for resources (Assumed)
+mu_P2 = 0.005 # Natural pupal mortality
+rho_Ah =  2 # 0.46 # 2 (According to Cailly et al, 2012, this parameter takes the value of 2 day^-1) 
+mu_Ah2 = 0.01 
+rho_Ar =  1/2 # Takes 2 days for egg to develop and seek oviposition site
+mu_Ar2 = 0.005 
+mu_Ao2 = 0.01
+K = 10^13  # From Okuneye et al, 
+
+param <- c(b, 
+           mu_E2, 
+           mu_L2, 
+           delta_L, 
+           mu_P2, 
+           rho_Ah, 
+           mu_Ah2, 
+           rho_Ar, 
+           mu_Ar2, 
+           mu_Ao2, 
+           K)
+
+# Initial conditions (I am not sure what values to use as initial conditions but I guess it doesn't matter much)
+# y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0, 6.4314, 41.0054)
+y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0)
+
+# Time steps
+start <- 0
+end <- 365*5
+times <- seq(start, end, by = 1)
+
+
+# Numerical integration using the ode() function from deSolve package
+out <-  ode(y = y.initial, func = pop.model2, times = times, parms = param, method = "lsoda") %>% 
+  data.frame()
+
+# Rename variable
+# out2 <- out2 %>%
+#   rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+#          resting.adults = X5, ovipositn.adults = X6, temp=X7, rain=X8)
+
+out <- out %>%
+  rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+         resting.adults = X5, ovipositn.adults = X6)
+
+#Add a column which contains the total number of adults (A = Ah + Ar + Ao) to the data.frame
+out <- out %>%
+  mutate(fixed.total.adults =  out$host.seeking.adults + out$resting.adults + out$ovipositn.adults)
+#
+
+# out <- out %>%
+#   mutate(vary.total.adults =  out$host.seeking.adults + out$resting.adults + out$ovipositn.adults)
+# 
+
+# Temp and rain need to be differentiated as it gets integrated through the function
+# out <- out %>%
+#   mutate(temperature =  c(out$temp[1],diff(out$temp)*(1/1)),
+#          rainfall = c(out$rain[1],diff(out$rain)*(1/1)))
+
+# This is when time step is 0.1. I changed it to 1 so we don't need this part.
+#out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/0.1)), 
+#         rainfall = c(out2$rain[1],diff(out2$rain)*(1/0.1)))
+
+# I wanna drop temp and rain column
+# df <- out2 %>%
+#   subset(select = -c(temp, rain) )
+
+#data <- write_csv(df, "data.csv")
+
+df <- out
+# # Define a function to produce the plots
+visualize <- function(p){
+  # Set plot environment
+  par(mfrow = c(3, 2), mar=c(2,4,2,2))    # 2 rows, 2 columns
+  
+  # Create plots
+  plot(df$time, df$eggs, type = "l", xlab = "Time (days)", ylab = "Egg abundance",
+       pch = 19, col = "blue")  # plot no. 1
+  
+  plot(df$time, df$larvae, type = "l", xlab = "Time (days)", ylab = "Larval abundance",
+       pch = 19, col = "green")     # plot no. 2
+  
+  plot(df$time, df$pupae, type = "l", xlab = "Time (days)", ylab = "Pupal abundance",
+       pch = 19, col = "yellow")     # plot no. 3
+  
+  plot(df$time, df$host.seeking.adults, type = "l", xlab = "Time (days)", ylab = "Adults seeking hosts",
+       pch = 19, col = "red")    # plot no. 4
+  
+  plot(df$time, df$resting.adults, type = "l", xlab = "Time (days)", ylab = "Adults resting",
+       pch = 19, col = "violet")    # plot no. 5
+  
+  plot(df$time, df$ovipositn.adults, type = "l", xlab = "Time (days)", ylab = "Adults ovipositing",
+       pch = 19, col = "orange")    # plot no. 6
+}
+
+visualize(p)
+
+fixed.condt_Alg <- df 
+#variable.condt_Alg <- df
+
+#variable.condt_Alg <- df 
+#write_csv(fixed.condt_Alg, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_Alg.csv")
+#write_csv(variable.condt_Alg, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_Alg.csv")
+
+##- --------------------------------------------------------------------------------------------------
+#. I use saved data from the above simulation analysis to produce figures for Algeria in the next chunk.
+##- --------------------------------------------------------------------------------------------------
+```
+
+
+```{r}
+# This will always run because I have saved the data and does not depend on the previous simulation
+
+# Clear space
+rm(list = ls())
+
+# Load data (on macbook)
+df_fix <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_Alg.csv")
+df_vary <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_Alg.csv")
+
+# Load data (on mac-mini)
+#df_fix <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_Alg.csv")
+#df_vary <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_Alg.csv")
+
+# Select needed columns
+df.fix <- df_fix %>% 
+  select(time, fixed.total.adults)
+
+# Select needed columns
+df.vary <- df_vary %>% 
+  select(time, vary.total.adults)
+
+# Put together into one dataframe
+df.alg.combined <- data.frame(time = df.fix$time, constant = df.fix$fixed.total.adults,
+                              seasonal = df.vary$vary.total.adults)
+
+# Select the year 5 data 
+df.alg.combined <- df.alg.combined[1461:nrow(df.alg.combined), ]
+
+# Convert data to the long format
+df.alg.combined <- df.alg.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# Plot data 
+population.alg <- ggplot(data = df.alg.combined, aes(x=time, y=value, col = Environment))+
+  geom_line(linewidth = 1)+
+  xlab("Time (days)") +
+  ylab("Population") +
+  theme_classic()
+
+population.alg
+
+# rename columns
+df.alg.combined2 <- df.alg.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.alg.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+
+ggplot(df.alg.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "Algeria",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.8),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+
+# Define the colors you want to use
+line_colors <- c("red", "purple")
+
+# The plot
+plot.alg <- ggplot(df.alg.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "Algeria",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.8)
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit)) +
+  scale_color_manual(values = line_colors)
+
+plot.alg
+
+# Save plot
+#ggsave(plot.alg, filename = "constant_and_seasonal_env_algeria.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+I include a chunk here to do a few calculations that is to be added to the manuscripts
+```{r}
+## Calculate total number of mosquito for constant and seasonal environments
+data_constant <- df.alg.combined2 %>% 
+  filter(Environment == "constant")
+
+constant_pop_abundance <- sum(data_constant$y)
+constant_pop_abundance
+
+###
+data_seasonal <- df.alg.combined2 %>% 
+  filter(Environment == "seasonal")
+
+seasonal_pop_abudance <- sum(data_seasonal$y)
+seasonal_pop_abudance
+
+####
+seasonal_pop_abudance/constant_pop_abundance
+```
+
+
+## Plot for Ghana
+
+```{r}
+# Define a function for the system of equations
+pop.model2 <- function(t, y, ...){
+  # Temperature
+  #temp <- 27.36355 + 1.79244*sin(2*pi*t/365) + 1.43960*cos(2*pi*t/365) # Data from Kumasi Ghana (West Africa)
+  temp <- 27 #Ghana average temp
+
+  # Monthly average rainfall 
+  #R <- 195.648 - 33.234*sin(2*pi*t/365) - 112.033*cos(2*pi*t/365) # Kumasi, Ghana
+  R <- 195 #Ghana average rainfall
+ 
+  # Oviposition rate as a function of temperature and rainfall based on Abdelrazec and Gumel, 2017
+  #phi_Ao = exp(-0.015*(temp-22)^2)*(1+1.2)*exp(-0.05*(R-10)^2)/(1.2+exp(-0.05*(R-10)^2))
+  
+  # Oviposition rate (genotrophic cycle) as a function of temperature
+  #phi_Ao = exp(-0.015*(temp-22)^2) #  based on Abdelrazec and Gumel, 2017 for Culex mosquitoes
+  
+  phi_Ao <-  0.443111*exp(-((temp - 34.388928)^2)/185.611107) # based on Beck-Johnson et al, 2013 and Lardeux et al, 2008 on Anopheles mosquito
+  
+  #phi_Ao <- ifelse(temp <= 15, 0.3973,  -5.4 + 1.8*temp - 0.2124*temp^2 + 0.01015*temp^3 - 0.0001515*temp^4) # Yang et al, 2009 and Wang & Zou, 2018 for Aedes aegypti
+  
+  # Egg hatching/development function based on Abdelrazec & Gumel, 2017
+  tauE <- 1.0074 + 6.1694*(1 + (temp/16.6460)^5.8166)^-1  # Average duration spent in egg stage
+  mu_E1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2))) # Egg mortality rate
+  PE.T <- exp(-mu_E1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  R_IM <- 350 # For Ghana data
+  P_ME <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PE.R <- R*(R_IM - R)*(4*P_ME / R_IM^2) # The rainfall-depende nt daily probability of survival of mosquito eggs
+  PE.TR <- PE.T*PE.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #(PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_E <- PE.TR/tauE
+  
+  
+  # Larvae development rate based on Abdelrazec & Gumel
+  tauL <- 7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1 # Average duration spent in larvae stage
+  mu_L1 <- ifelse(temp <= 15, 0.09597, 
+                  ifelse(temp >= 31, 0.09597, 
+                         0.0211*exp(((temp - 23)/6.5)^2))) # Larvae mortality, Beck-Johnson et al, 2013
+  PL.T <- exp(-mu_L1) #   daily  survival  probability  of immature  mosquitoes  in  larvae stage
+  P_ML <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PL.R <- R*(R_IM - R)*(4*P_ML / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PL.TR <- PL.T*PL.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE))  # Development rate of larvae to pupae, Okuneye et al., 
+  rho_L <- PL.TR/tauL # Development rate of larvae to pupae Supplemental material by Parham
+  
+  # Pupa development rate based on Abdelrazec & Gumel
+  tauP <- ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1) # Average duration spent in egg stage
+  mu_P1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2)))
+  PP.T <- exp(-mu_P1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  P_MP <- 0.90 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PP.R <- R*(R_IM - R)*(4*P_MP / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PP.TR <- PP.T*PP.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_P <- PP.TR/tauP
+  
+  # Adult mortality rate 
+  mu_A <- -log(-0.000828*temp^2 + 0.0367*temp + 0.522) # Taken from Mordecai and Okuneye
+  #mu_A <- 0.0005*(temp - 28)^2 + 0.04 # This is from Abdelrezec & Gumel
+  
+  # The number of states
+  E = y[1]
+  L = y[2]
+  P = y[3]
+  Ah = y[4]
+  Ar = y[5]
+  Ao = y[6]
+  
+  # The system of equations (This model is based on Lutambi et al, 2013)
+  dE <- b*phi_Ao*(1-Ao/K)*Ao - (rho_E + mu_E1 + mu_E2)*E
+  dL <- rho_E*E - (rho_L + mu_L1 + mu_L2 + delta_L*L)*L
+  dP <- rho_L*L - (rho_P + mu_P1 + mu_P2)*P
+  dAh <- rho_P*P + phi_Ao*Ao - (rho_Ah + mu_A + mu_Ah2)*Ah
+  dAr <- rho_Ah*Ah - (rho_Ar + mu_A +mu_Ar2)*Ar
+  dAo <- rho_Ar*Ar - (phi_Ao + mu_A + mu_Ao2)*Ao
+  #return(list(c(dE, dL, dP, dAh, dAr, dAo, temp, R)))
+  return(list(c(dE, dL, dP, dAh, dAr, dAo)))
+}
+
+# Model parameters (All parameter values are based on Lutambi et al, 2013) and adapted to Anopheles species
+b  = 200      # number of eggs laid per oviposition (range  100 - 400 eggs at a time) https://www.canada.ca/en/health-canada/services/pest-control-tips/mosquitoes.html
+mu_E2 = 0.005    # extra natural mortality of eggs that is not dependent on environmental conditions
+mu_L2 = 0.005 # Natural mortality of larvae
+delta_L = 0.01 # For every 100 larvae, 1 larvae will probably die due to competition for resources (Assumed)
+mu_P2 = 0.005 # Natural pupal mortality
+rho_Ah =  2 # 0.46 # 2 (According to Cailly et al, 2012, this parameter takes the value of 2 day^-1) 
+mu_Ah2 = 0.01 
+rho_Ar =  1/2 # Takes 2 days for egg to develop and seek oviposition site
+mu_Ar2 = 0.005 
+mu_Ao2 = 0.01
+K = 10^13  # From Okuneye et al, 
+
+param <- c(b, 
+           mu_E2, 
+           mu_L2, 
+           delta_L, 
+           mu_P2, 
+           rho_Ah, 
+           mu_Ah2, 
+           rho_Ar, 
+           mu_Ar2, 
+           mu_Ao2, 
+           K)
+
+# Initial conditions (I am not sure what values to use as initial conditions but I guess it doesn't matter much)
+#y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0, 6.4314, 41.0054)
+y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0)
+
+# Time steps (Period with which to run the model)
+start <- 0
+end <- 365*5
+times <- seq(start, end, by = 1)
+
+# Numerical integration using the ode() function from deSolve package
+out2 <-  ode(y = y.initial, func = pop.model2, times = times, parms = param, method = "lsoda") %>% 
+  data.frame()
+
+# Rename variable
+# out2 <- out2 %>%
+#   rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+#          resting.adults = X5, ovipositn.adults = X6, temp=X7, rain=X8)
+
+out2 <- out2 %>%
+  rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+         resting.adults = X5, ovipositn.adults = X6)
+
+#Add a column which contains the total number of adults (A = Ah + Ar + Ao) to the data.frame
+out2 <- out2 %>%
+  mutate(fixed.total.adults =  out2$host.seeking.adults + out2$resting.adults + out2$ovipositn.adults)
+#
+# 
+# out2 <- out2 %>%
+#   mutate(vary.total.adults =  out2$host.seeking.adults + out2$resting.adults + out2$ovipositn.adults)
+# 
+
+# Temp and rain need to be differentiated as it gets integrated through the function
+# out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/1)), 
+#          rainfall = c(out2$rain[1],diff(out2$rain)*(1/1)))
+# 
+# This is when time step is 0.1. I changed it to 1 so we don't need this part.
+#out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/0.1)), 
+#         rainfall = c(out2$rain[1],diff(out2$rain)*(1/0.1)))
+
+# I wanna drop temp and rain column
+# df <- out2 %>%
+#   subset(select = -c(temp, rain) )
+
+#data <- write_csv(df, "data.csv")
+
+df <- out2
+# # Define a function to produce the plots
+visualize <- function(p){
+  # Set plot environment
+  par(mfrow = c(3, 2), mar=c(2,4,2,2))    # 2 rows, 2 columns
+  
+  # Create plots
+  plot(df$time, df$eggs, type = "l", xlab = "Time (days)", ylab = "Egg abundance",
+       pch = 19, col = "blue")  # plot no. 1
+  
+  plot(df$time, df$larvae, type = "l", xlab = "Time (days)", ylab = "Larval abundance",
+       pch = 19, col = "green")     # plot no. 2
+  
+  plot(df$time, df$pupae, type = "l", xlab = "Time (days)", ylab = "Pupal abundance",
+       pch = 19, col = "yellow")     # plot no. 3
+  
+  plot(df$time, df$host.seeking.adults, type = "l", xlab = "Time (days)", ylab = "Adults seeking hosts",
+       pch = 19, col = "red")    # plot no. 4
+  
+  plot(df$time, df$resting.adults, type = "l", xlab = "Time (days)", ylab = "Adults resting",
+       pch = 19, col = "violet")    # plot no. 5
+  
+  plot(df$time, df$ovipositn.adults, type = "l", xlab = "Time (days)", ylab = "Adults ovipositing",
+       pch = 19, col = "orange")    # plot no. 6
+}
+
+visualize(p)
+
+fixed.condt_gh <- df 
+#variable.condt_gh <- df 
+
+#write_csv(fixed.condt_gh, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_gh.csv")
+#write_csv(variable.condt_gh, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+```
+
+
+```{r}
+##- --------------------------------------------------------------------------------------------------
+#. I use saved data from the above simulation analysis to produce figures for Ghana
+##- --------------------------------------------------------------------------------------------------
+
+# Load data (on macbook)
+df_fix.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_gh.csv")
+df_vary.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+# Load data (on macmini)
+# df_fix.gh <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_gh.csv")
+# df_vary.gh <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+df.fix.gh <- df_fix.gh %>% 
+  select(time, fixed.total.adults)
+
+df.vary.gh <- df_vary.gh %>% 
+  select(time, vary.total.adults)
+
+
+df.gh.combined <- data.frame(time = df.fix.gh$time, constant = df.fix.gh$fixed.total.adults,
+                              seasonal = df.vary.gh$vary.total.adults)
+
+df.gh.combined <- df.gh.combined[1460:nrow(df.gh.combined), ]
+
+df.gh.combined <- df.gh.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# Plot data 
+population.gh <- ggplot(data = df.gh.combined, aes(x=time, y=value, col = Environment))+
+  geom_line(linewidth = 1)+
+  xlab("Time (days)") +
+  ylab("Population") +
+  theme_classic()
+
+population.gh
+
+# rename columns
+df.gh.combined2 <- df.gh.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.gh.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+ggplot(df.gh.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "Ghana",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.7),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+
+# Define the colors you want to use
+line_colors <- c("red", "darkred")
+
+# The plot
+plot.gh <- ggplot(df.gh.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "Ghana",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.7)) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit)) +
+scale_color_manual(values = line_colors)
+
+plot.gh
+  
+# Save plot
+#ggsave(plot.gh, filename = "constant_and_seasonal_env_ghana.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+some calculations to be included in the manuscript
+```{r}
+data_seasonal_gh <- df.gh.combined2 %>% 
+  filter(Environment == "seasonal")
+
+seasonal_pop_abudance_gh <- sum(data_seasonal_gh$y)
+seasonal_pop_abudance_gh
+```
+
+
+## Plot for Kenya
+
+```{r}
+# Define a function for the system of equations
+pop.model2 <- function(t, y, ...){
+  # A function for daily temperature 
+  temp <- 19.86656 + 0.32835*sin(2*pi*t/365) + 0.83746*cos(2*pi*t/365) # Data from Nairobi, Kenya (East Africa) (Not too good fit)
+  #temp <- 20 #Kenya average temp
+  
+  # Monthly average rainfall 
+  R <- 114.94298*(1 + 0.52783*cos(2*pi*(1.69070*t - 199.83939)/365)) # Nairobi, Kenya (East Africa)
+  #R <- 118 #Kenya average rainfall
+  
+  # Oviposition rate as a function of temperature and rainfall based on Abdelrazec and Gumel, 2017
+  #phi_Ao = exp(-0.015*(temp-22)^2)*(1+1.2)*exp(-0.05*(R-10)^2)/(1.2+exp(-0.05*(R-10)^2))
+  
+  # Oviposition rate (genotrophic cycle) as a function of temperature
+  #phi_Ao = exp(-0.015*(temp-22)^2) #  based on Abdelrazec and Gumel, 2017 for Culex mosquitoes
+  
+  phi_Ao <-  0.443111*exp(-((temp - 34.388928)^2)/185.611107) # based on Beck-Johnson et al, 2013 and Lardeux et al, 2008 on Anopheles mosquito
+  
+  #phi_Ao <- ifelse(temp <= 15, 0.3973,  -5.4 + 1.8*temp - 0.2124*temp^2 + 0.01015*temp^3 - 0.0001515*temp^4) # Yang et al, 2009 and Wang & Zou, 2018 for Aedes aegypti
+  
+  # Number of eggs laid per adult female per day (Mordecai et al, 2013, Delatte et al. 2009)
+  #b.func <- -0.153*temp^2 + 8.61*temp - 97.7 # species is Aedes albopictus
+  #b <- ifelse(temp<=16, 0.1, b.func) 
+  
+  # Egg hatching/development function based on Abdelrazec & Gumel, 2017
+  tauE <- 1.0074 + 6.1694*(1 + (temp/16.6460)^5.8166)^-1  # Average duration spent in egg stage
+  mu_E1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2))) # Egg mortality rate
+  PE.T <- exp(-mu_E1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  R_IM <- 220 # For Kenya data
+  P_ME <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PE.R <- R*(R_IM - R)*(4*P_ME / R_IM^2) # The rainfall-depende nt daily probability of survival of mosquito eggs
+  PE.TR <- PE.T*PE.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #(PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_E <- PE.TR/tauE
+  
+  
+  # Larvae development rate based on Abdelrazec & Gumel
+  tauL <- 7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1 # Average duration spent in larvae stage
+  mu_L1 <- ifelse(temp <= 15, 0.09597, 
+                  ifelse(temp >= 31, 0.09597, 
+                         0.0211*exp(((temp - 23)/6.5)^2))) # Larvae mortality, Beck-Johnson et al, 2013
+  PL.T <- exp(-mu_L1) #   daily  survival  probability  of immature  mosquitoes  in  larvae stage
+  P_ML <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PL.R <- R*(R_IM - R)*(4*P_ML / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PL.TR <- PL.T*PL.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE))  # Development rate of larvae to pupae, Okuneye et al., 
+  rho_L <- PL.TR/tauL # Development rate of larvae to pupae Supplemental material by Parham
+  
+  # Pupa development rate based on Abdelrazec & Gumel
+  tauP <- ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1) # Average duration spent in egg stage
+  mu_P1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2)))
+  PP.T <- exp(-mu_P1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  P_MP <- 0.90 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PP.R <- R*(R_IM - R)*(4*P_MP / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PP.TR <- PP.T*PP.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_P <- PP.TR/tauP
+  
+  # Adult mortality rate 
+  mu_A <- -log(-0.000828*temp^2 + 0.0367*temp + 0.522) # Taken from Mordecai and Okuneye
+  #mu_A <- 0.0005*(temp - 28)^2 + 0.04 # This is from Abdelrezec & Gumel
+  
+  # The number of states
+  E = y[1]
+  L = y[2]
+  P = y[3]
+  Ah = y[4]
+  Ar = y[5]
+  Ao = y[6]
+  
+  # The system of equations (This model is based on Lutambi et al, 2013)
+  dE <- b*phi_Ao*(1-Ao/K)*Ao - (rho_E + mu_E1 + mu_E2)*E
+  dL <- rho_E*E - (rho_L + mu_L1 + mu_L2 + delta_L*L)*L
+  dP <- rho_L*L - (rho_P + mu_P1 + mu_P2)*P
+  dAh <- rho_P*P + phi_Ao*Ao - (rho_Ah + mu_A + mu_Ah2)*Ah
+  dAr <- rho_Ah*Ah - (rho_Ar + mu_A +mu_Ar2)*Ar
+  dAo <- rho_Ar*Ar - (phi_Ao + mu_A + mu_Ao2)*Ao
+  #return(list(c(dE, dL, dP, dAh, dAr, dAo, temp, R)))
+  return(list(c(dE, dL, dP, dAh, dAr, dAo)))
+}
+
+# Model parameters (All parameter values are based on Lutambi et al, 2013) and adapted to Anopheles species
+b  = 200      # number of eggs laid per oviposition (range  100 - 400 eggs at a time) https://www.canada.ca/en/health-canada/services/pest-control-tips/mosquitoes.html
+mu_E2 = 0.005    # extra natural mortality of eggs that is not dependent on environmental conditions
+mu_L2 = 0.005 # Natural mortality of larvae
+delta_L = 0.01 # For every 100 larvae, 1 larvae will probably die due to competition for resources (Assumed)
+mu_P2 = 0.005 # Natural pupal mortality
+rho_Ah =  2 # 0.46 # 2 (According to Cailly et al, 2012, this parameter takes the value of 2 day^-1) 
+mu_Ah2 = 0.01 
+rho_Ar =  1/2 # Takes 2 days for egg to develop and seek oviposition site
+mu_Ar2 = 0.005 
+mu_Ao2 = 0.01
+K = 10^13  # From Okuneye et al, 
+
+param <- c(b, 
+           mu_E2, 
+           mu_L2, 
+           delta_L, 
+           mu_P2, 
+           rho_Ah, 
+           mu_Ah2, 
+           rho_Ar, 
+           mu_Ar2, 
+           mu_Ao2, 
+           K)
+
+# Initial conditions (I am not sure what values to use as initial conditions but I guess it doesn't matter much)
+#y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0, 6.4314, 41.0054)
+y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0)
+
+# Time steps (Period with which to run the model)
+
+start <- 0
+end <- 365*5
+times <- seq(start, end, by = 1)
+
+
+# Numerical integration using the ode() function from deSolve package
+out2 <-  ode(y = y.initial, func = pop.model2, times = times, parms = param, method = "lsoda") %>% 
+  data.frame()
+
+# Rename variable
+# out2 <- out2 %>%
+#   rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+#          resting.adults = X5, ovipositn.adults = X6, temp=X7, rain=X8)
+
+out2 <- out2 %>%
+  rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+         resting.adults = X5, ovipositn.adults = X6)
+
+#Add a column which contains the total number of adults (A = Ah + Ar + Ao) to the data.frame
+# out2 <- out2 %>% 
+#   mutate(fixed.total.adults =  out2$host.seeking.adults + out2$resting.adults + out2$ovipositn.adults)
+# # 
+
+out2 <- out2 %>%
+  mutate(vary.total.adults =  out2$host.seeking.adults + out2$resting.adults + out2$ovipositn.adults)
+
+# Temp and rain need to be differentiated as it gets integrated through the function
+# out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/1)), 
+#          rainfall = c(out2$rain[1],diff(out2$rain)*(1/1)))
+
+# This is when time step is 0.1. I changed it to 1 so we don't need this part.
+#out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/0.1)), 
+#         rainfall = c(out2$rain[1],diff(out2$rain)*(1/0.1)))
+
+# # I wanna drop temp and rain column
+# df <- out2 %>%
+#   subset(select = -c(temp, rain) )
+
+#data <- write_csv(df, "data.csv")
+
+df <- out2
+# # Define a function to produce the plots
+visualize <- function(p){
+  # Set plot environment
+  par(mfrow = c(3, 2), mar=c(2,4,2,2))    # 2 rows, 2 columns
+  
+  # Create plots
+  plot(df$time, df$eggs, type = "l", xlab = "Time (days)", ylab = "Egg abundance",
+       pch = 19, col = "blue")  # plot no. 1
+  
+  plot(df$time, df$larvae, type = "l", xlab = "Time (days)", ylab = "Larval abundance",
+       pch = 19, col = "green")     # plot no. 2
+  
+  plot(df$time, df$pupae, type = "l", xlab = "Time (days)", ylab = "Pupal abundance",
+       pch = 19, col = "yellow")     # plot no. 3
+  
+  plot(df$time, df$host.seeking.adults, type = "l", xlab = "Time (days)", ylab = "Adults seeking hosts",
+       pch = 19, col = "red")    # plot no. 4
+  
+  plot(df$time, df$resting.adults, type = "l", xlab = "Time (days)", ylab = "Adults resting",
+       pch = 19, col = "violet")    # plot no. 5
+  
+  plot(df$time, df$ovipositn.adults, type = "l", xlab = "Time (days)", ylab = "Adults ovipositing",
+       pch = 19, col = "orange")    # plot no. 6
+}
+
+visualize(p)
+
+#fixed.condt_kenya <- df 
+variable.condt_kenya <- df 
+
+#write_csv(fixed.condt_kenya, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_kenya.csv")
+#write_csv(variable.condt_kenya, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+```
+
+
+```{r}
+
+##- --------------------------------------------------------------------------------------------------
+#.  Figures for Kenya
+##- --------------------------------------------------------------------------------------------------
+
+# Load data
+df_fix.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_kenya.csv")
+df_vary.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+
+df.fix.kenya <- df_fix.kenya %>% 
+  select(time, fixed.total.adults)
+
+df.vary.kenya <- df_vary.kenya %>% 
+  select(time, vary.total.adults)
+
+
+df.kenya.combined <- data.frame(time = df.fix.kenya$time, constant = df.fix.kenya$fixed.total.adults,
+                             seasonal = df.vary.kenya$vary.total.adults)
+
+df.kenya.combined <- df.kenya.combined[1460:nrow(df.kenya.combined), ]
+
+df.kenya.combined <- df.kenya.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# Plot data 
+population.kenya <- ggplot(data = df.kenya.combined, aes(x=time, y=value, col = Environment))+
+  geom_line(linewidth = 1)+
+  xlab("Time (days)") +
+  ylab("Population") +
+  theme_classic()
+
+population.kenya
+
+# rename columns
+df.kenya.combined2 <- df.kenya.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.kenya.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+ggplot(df.kenya.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "Kenya",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.4),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+
+# Define the colors you want to use
+line_colors <- c("red", "orange")
+
+plot.kenya <- ggplot(df.kenya.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "Kenya",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.4)) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit)) +
+scale_color_manual(values = line_colors)
+
+plot.kenya
+# Save 
+#ggsave(plot.kenya, filename = "constant_and_seasonal_env_kenya.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+## Plot for South Africa
+
+```{r}
+# Define a function for the system of equations
+pop.model2 <- function(t, y, ...){
+  # A function for daily temperature
+  
+  temp <- 18.01768 + 2.02738*sin(2*pi*t/365) + 3.53049*cos(2*pi*t/365) # Data from Cape Town, SA (Good fit)
+  #temp <- 18 #SA average temp
+  
+  
+  # Monthly average rainfall 
+  R <- 76.891 - 9.785*sin(2*pi*t/365) - 71.288*cos(2*pi*t/365) # Cape Town, South Africa (Southern Africa)
+  #R <- 77 #SA average rainfall
+  
+  # Oviposition rate as a function of temperature and rainfall based on Abdelrazec and Gumel, 2017
+  #phi_Ao = exp(-0.015*(temp-22)^2)*(1+1.2)*exp(-0.05*(R-10)^2)/(1.2+exp(-0.05*(R-10)^2))
+  
+  # Oviposition rate (genotrophic cycle) as a function of temperature
+  #phi_Ao = exp(-0.015*(temp-22)^2) #  based on Abdelrazec and Gumel, 2017 for Culex mosquitoes
+  
+  phi_Ao <-  0.443111*exp(-((temp - 34.388928)^2)/185.611107) # based on Beck-Johnson et al, 2013 and Lardeux et al, 2008 on Anopheles mosquito
+  
+  #phi_Ao <- ifelse(temp <= 15, 0.3973,  -5.4 + 1.8*temp - 0.2124*temp^2 + 0.01015*temp^3 - 0.0001515*temp^4) # Yang et al, 2009 and Wang & Zou, 2018 for Aedes aegypti
+  
+  # Number of eggs laid per adult female per day (Mordecai et al, 2013, Delatte et al. 2009)
+  #b.func <- -0.153*temp^2 + 8.61*temp - 97.7 # species is Aedes albopictus
+  #b <- ifelse(temp<=16, 0.1, b.func) 
+  
+  # Egg hatching/development function based on Abdelrazec & Gumel, 2017
+  tauE <- 1.0074 + 6.1694*(1 + (temp/16.6460)^5.8166)^-1  # Average duration spent in egg stage
+  mu_E1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2))) # Egg mortality rate
+  PE.T <- exp(-mu_E1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  R_IM <- 200 # For SA data
+  P_ME <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PE.R <- R*(R_IM - R)*(4*P_ME / R_IM^2) # The rainfall-depende nt daily probability of survival of mosquito eggs
+  PE.TR <- PE.T*PE.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #(PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_E <- PE.TR/tauE
+  
+  # Larvae development rate based on Abdelrazec & Gumel
+  tauL <- 7.1361 + 10.1433*(1 + (temp/21.1947)^9.8122)^-1 # Average duration spent in larvae stage
+  mu_L1 <- ifelse(temp <= 15, 0.09597, 
+                  ifelse(temp >= 31, 0.09597, 
+                         0.0211*exp(((temp - 23)/6.5)^2))) # Larvae mortality, Beck-Johnson et al, 2013
+  PL.T <- exp(-mu_L1) #   daily  survival  probability  of immature  mosquitoes  in  larvae stage
+  P_ML <- 0.9 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PL.R <- R*(R_IM - R)*(4*P_ML / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PL.TR <- PL.T*PL.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE))  # Development rate of larvae to pupae, Okuneye et al., 
+  rho_L <- PL.TR/tauL # Development rate of larvae to pupae Supplemental material by Parham
+  
+  # Pupa development rate based on Abdelrazec & Gumel
+  tauP <- ifelse(temp<=15, 9, 0.9933 + 127.6942*(1 + (temp/5.8999)^2.8134)^-1) # Average duration spent in egg stage
+  mu_P1 <- ifelse(temp <= 15, 0.2415, 
+                  ifelse(temp >= 31, 0.2415, 
+                         0.0531*exp(((temp - 23)/6.5)^2)))
+  PP.T <- exp(-mu_P1) #   daily  survival  probability  of immature  mosquitoes  in  egg stage
+  P_MP <- 0.90 # Peak  daily  survival  probability  of  immature  mosquito  egg stage
+  PP.R <- R*(R_IM - R)*(4*P_MP / R_IM^2) # The rainfall-dependent daily probability of survival of mosquito eggs
+  PP.TR <- PP.T*PP.R #  The  daily  survival  probability  of immature mosquitoes  in egg stage
+  #rho_E <- (PE.TR^tauE)*(1 - PE.TR)/(1 - (PE.TR^tauE)) 
+  rho_P <- PP.TR/tauP
+  
+  # Adult mortality rate 
+  mu_A <- -log(-0.000828*temp^2 + 0.0367*temp + 0.522) # Taken from Mordecai and Okuneye
+  #mu_A <- 0.0005*(temp - 28)^2 + 0.04 # This is from Abdelrezec & Gumel
+  
+  # The number of states
+  E = y[1]
+  L = y[2]
+  P = y[3]
+  Ah = y[4]
+  Ar = y[5]
+  Ao = y[6]
+  
+  # The system of equations (This model is based on Lutambi et al, 2013)
+  dE <- b*phi_Ao*(1-Ao/K)*Ao - (rho_E + mu_E1 + mu_E2)*E
+  dL <- rho_E*E - (rho_L + mu_L1 + mu_L2 + delta_L*L)*L
+  dP <- rho_L*L - (rho_P + mu_P1 + mu_P2)*P
+  dAh <- rho_P*P + phi_Ao*Ao - (rho_Ah + mu_A + mu_Ah2)*Ah
+  dAr <- rho_Ah*Ah - (rho_Ar + mu_A +mu_Ar2)*Ar
+  dAo <- rho_Ar*Ar - (phi_Ao + mu_A + mu_Ao2)*Ao
+  #return(list(c(dE, dL, dP, dAh, dAr, dAo, temp, R)))
+  return(list(c(dE, dL, dP, dAh, dAr, dAo)))
+}
+
+# Model parameters (All parameter values are based on Lutambi et al, 2013) and adapted to Anopheles species
+b  = 200      # number of eggs laid per oviposition (range  100 - 400 eggs at a time) https://www.canada.ca/en/health-canada/services/pest-control-tips/mosquitoes.html
+mu_E2 = 0.005    # extra natural mortality of eggs that is not dependent on environmental conditions
+mu_L2 = 0.005 # Natural mortality of larvae
+delta_L = 0.01 # For every 100 larvae, 1 larvae will probably die due to competition for resources (Assumed)
+mu_P2 = 0.005 # Natural pupal mortality
+rho_Ah =  2 # 0.46 # 2 (According to Cailly et al, 2012, this parameter takes the value of 2 day^-1) 
+mu_Ah2 = 0.01 
+rho_Ar =  1/2 # Takes 2 days for egg to develop and seek oviposition site
+mu_Ar2 = 0.005 
+mu_Ao2 = 0.01
+K = 10^13  # From Okuneye et al, 
+
+param <- c(b, 
+           mu_E2, 
+           mu_L2, 
+           delta_L, 
+           mu_P2, 
+           rho_Ah, 
+           mu_Ah2, 
+           rho_Ar, 
+           mu_Ar2, 
+           mu_Ao2, 
+           K)
+
+# Initial conditions (I am not sure what values to use as initial conditions but I guess it doesn't matter much)
+#y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0, 6.4314, 41.0054)
+y.initial <- c(100.0, 100.0, 100.0, 30.0, 30.0, 40.0)
+
+# Time steps (Period with which to run the model)
+
+start <- 0
+end <- 365*5
+times <- seq(start, end, by = 1)
+
+
+# Numerical integration using the ode() function from deSolve package
+out2 <-  ode(y = y.initial, func = pop.model2, times = times, parms = param, method = "lsoda") %>% 
+  data.frame()
+
+# Rename variable
+# out2 <- out2 %>%
+#   rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+#          resting.adults = X5, ovipositn.adults = X6, temp=X7, rain=X8)
+
+out2 <- out2 %>%
+  rename(eggs = X1, larvae = X2, pupae = X3, host.seeking.adults = X4,
+         resting.adults = X5, ovipositn.adults = X6)
+
+#Add a column which contains the total number of adults (A = Ah + Ar + Ao) to the data.frame
+# out2 <- out2 %>% 
+#   mutate(fixed.total.adults =  out2$host.seeking.adults + out2$resting.adults + out2$ovipositn.adults)
+# # 
+
+out2 <- out2 %>%
+  mutate(vary.total.adults =  out2$host.seeking.adults + out2$resting.adults + out2$ovipositn.adults)
+
+
+# Temp and rain need to be differentiated as it gets integrated through the function
+# out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/1)), 
+#          rainfall = c(out2$rain[1],diff(out2$rain)*(1/1)))
+
+# This is when time step is 0.1. I changed it to 1 so we don't need this part.
+#out2 <- out2 %>% 
+#   mutate(temperature =  c(out2$temp[1],diff(out2$temp)*(1/0.1)), 
+#         rainfall = c(out2$rain[1],diff(out2$rain)*(1/0.1)))
+
+# I wanna drop temp and rain column
+# df <- out2 %>%
+#   subset(select = -c(temp, rain) )
+
+#data <- write_csv(df, "data.csv")
+
+df <- out2
+# # Define a function to produce the plots
+visualize <- function(p){
+  # Set plot environment
+  par(mfrow = c(3, 2), mar=c(2,4,2,2))    # 2 rows, 2 columns
+  
+  # Create plots
+  plot(df$time, df$eggs, type = "l", xlab = "Time (days)", ylab = "Egg abundance",
+       pch = 19, col = "blue")  # plot no. 1
+  
+  plot(df$time, df$larvae, type = "l", xlab = "Time (days)", ylab = "Larval abundance",
+       pch = 19, col = "green")     # plot no. 2
+  
+  plot(df$time, df$pupae, type = "l", xlab = "Time (days)", ylab = "Pupal abundance",
+       pch = 19, col = "yellow")     # plot no. 3
+  
+  plot(df$time, df$host.seeking.adults, type = "l", xlab = "Time (days)", ylab = "Adults seeking hosts",
+       pch = 19, col = "red")    # plot no. 4
+  
+  plot(df$time, df$resting.adults, type = "l", xlab = "Time (days)", ylab = "Adults resting",
+       pch = 19, col = "violet")    # plot no. 5
+  
+  plot(df$time, df$ovipositn.adults, type = "l", xlab = "Time (days)", ylab = "Adults ovipositing",
+       pch = 19, col = "orange")    # plot no. 6
+}
+
+visualize(p)
+
+#fixed.condt_sa <- df 
+variable.condt_sa <- df 
+
+#write_csv(fixed.condt_sa, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_sa.csv")
+#write_csv(variable.condt_sa, file = "/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+```
+
+
+```{r}
+
+##- --------------------------------------------------------------------------------------------------
+#.  Figures for SA
+##- --------------------------------------------------------------------------------------------------
+
+# Load data
+df_fix.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_sa.csv")
+df_vary.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+df.fix.sa <- df_fix.sa %>% 
+  select(time, fixed.total.adults)
+
+df.vary.sa <- df_vary.sa %>% 
+  select(time, vary.total.adults)
+
+
+df.sa.combined <- data.frame(time = df.fix.sa$time, constant = df.fix.sa$fixed.total.adults,
+                                seasonal = df.vary.sa$vary.total.adults)
+
+df.sa.combined <- df.sa.combined[1460:nrow(df.sa.combined), ]
+
+df.sa.combined <- df.sa.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# Plot data 
+population.sa <- ggplot(data = df.sa.combined, aes(x=time, y=value, col = Environment))+
+  geom_line(linewidth = 1)+
+  xlab("Time (days)") +
+  ylab("Population") +
+  theme_classic()
+
+population.sa
+
+# rename columns
+df.sa.combined2 <- df.sa.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.sa.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+# Define the colors you want to use
+line_colors <- c("red", "darkgreen")
+
+plot.sa <- ggplot(df.sa.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "South Africa",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.8)) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit)) +
+scale_color_manual(values = line_colors)
+
+plot.sa
+
+# Save plot
+ggsave(plot.sa, filename = "constant_and_seasonal_env_sa.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+```{r}
+data_seasonal_sa <- df.sa.combined2 %>% 
+  filter(Environment == "seasonal")
+
+seasonal_pop_abudance_sa <- sum(data_seasonal_sa$y)
+seasonal_pop_abudance_sa
+seasonal_pop_abudance_gh
+
+seasonal_pop_abudance_gh/seasonal_pop_abudance_sa
+```
+
+
+
+I will put the figures together and label them to be included in the paper as a single figure
+```{r}
+library(cowplot)
+library(magick)
+
+# Load saved figures
+plot_algeria <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/constant_and_seasonal_env_algeria.png", scale = 1)
+plot_ghana <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/constant_and_seasonal_env_ghana.png", scale = 1)
+plot_kenya <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/constant_and_seasonal_env_kenya.png", scale = 1)
+plot_sa <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/constant_and_seasonal_env_sa.png", scale = 1)
+
+# Numbering the plots
+numbered_plot_algeria <- plot_algeria + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14) # Here the font normal
+numbered_plot_sa <- plot_sa + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_kenya <- plot_kenya + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_ghana <- plot_ghana + draw_label("(d)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_algeria, 
+  numbered_plot_sa, 
+  numbered_plot_kenya, 
+  numbered_plot_ghana,
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "constant_vrs_seasonal_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+## I am doing the same as above in one big chunk
+
+```{r}
+# Clear space
+rm(list = ls())
+
+# Load data (on macbook)
+df_fix <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_Alg.csv")
+df_vary <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_Alg.csv")
+
+# Load data (on mac-mini)
+#df_fix <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_Alg.csv")
+#df_vary <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_Alg.csv")
+
+# Select needed columns
+df.fix <- df_fix %>% 
+  select(time, fixed.total.adults)
+
+# Select needed columns
+df.vary <- df_vary %>% 
+  select(time, vary.total.adults)
+
+# Put together into one dataframe
+df.alg.combined <- data.frame(time = df.fix$time, constant = df.fix$fixed.total.adults,
+                              seasonal = df.vary$vary.total.adults)
+
+# Select the year 5 data 
+df.alg.combined <- df.alg.combined[1461:nrow(df.alg.combined), ]
+
+# Convert data to the long format
+df.alg.combined <- df.alg.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# rename columns
+df.alg.combined2 <- df.alg.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.alg.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+
+plot.alg <- ggplot(df.alg.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = paste("(a)", "Algeria", sep = " "),  # Add a space between (a) and Algeria
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.8),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+plot.alg
+
+##- --------------------------------------------------------------------------------------------------
+#. I use saved data from the above simulation analysis to produce figures for Ghana
+##- --------------------------------------------------------------------------------------------------
+
+# Load data (on macbook)
+df_fix.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_gh.csv")
+df_vary.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+# Load data (on macmini)
+# df_fix.gh <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_gh.csv")
+# df_vary.gh <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+df.fix.gh <- df_fix.gh %>% 
+  select(time, fixed.total.adults)
+
+df.vary.gh <- df_vary.gh %>% 
+  select(time, vary.total.adults)
+
+
+df.gh.combined <- data.frame(time = df.fix.gh$time, constant = df.fix.gh$fixed.total.adults,
+                             seasonal = df.vary.gh$vary.total.adults)
+
+df.gh.combined <- df.gh.combined[1460:nrow(df.gh.combined), ]
+
+df.gh.combined <- df.gh.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# rename columns
+df.gh.combined2 <- df.gh.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.gh.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+plot.gh <- ggplot(df.gh.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "(d) Ghana",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.7),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+plot.gh
+
+##- --------------------------------------------------------------------------------------------------
+#.  Figures for Kenya
+##- --------------------------------------------------------------------------------------------------
+
+# Load data
+df_fix.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_kenya.csv")
+df_vary.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+
+df.fix.kenya <- df_fix.kenya %>% 
+  select(time, fixed.total.adults)
+
+df.vary.kenya <- df_vary.kenya %>% 
+  select(time, vary.total.adults)
+
+
+df.kenya.combined <- data.frame(time = df.fix.kenya$time, constant = df.fix.kenya$fixed.total.adults,
+                                seasonal = df.vary.kenya$vary.total.adults)
+
+df.kenya.combined <- df.kenya.combined[1460:nrow(df.kenya.combined), ]
+
+df.kenya.combined <- df.kenya.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# rename columns
+df.kenya.combined2 <- df.kenya.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.kenya.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+plot.kenya <- ggplot(df.kenya.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "(c)  Kenya",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.4),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+plot.kenya
+
+
+##- --------------------------------------------------------------------------------------------------
+#.  Figures for SA
+##- --------------------------------------------------------------------------------------------------
+
+# Load data
+df_fix.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_sa.csv")
+df_vary.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+df.fix.sa <- df_fix.sa %>% 
+  select(time, fixed.total.adults)
+
+df.vary.sa <- df_vary.sa %>% 
+  select(time, vary.total.adults)
+
+
+df.sa.combined <- data.frame(time = df.fix.sa$time, constant = df.fix.sa$fixed.total.adults,
+                             seasonal = df.vary.sa$vary.total.adults)
+
+df.sa.combined <- df.sa.combined[1460:nrow(df.sa.combined), ]
+
+df.sa.combined <- df.sa.combined %>% 
+  pivot_longer(cols=c("constant", "seasonal"),
+               names_to='Environment',
+               values_to='value')
+
+# rename columns
+df.sa.combined2 <- df.sa.combined %>% 
+  rename(
+    x = time,
+    y = value
+  )
+
+# Change time to months
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df.sa.combined2$y) * 1.1  # Adjust the buffer as needed (e.g., 1.1 for a 10% buffer)
+
+plot.sa <- ggplot(df.sa.combined2, aes(x, y, col = Environment)) +
+  geom_line(lwd = 1) +
+  labs(title = "(b)  South Africa",
+       x = "",
+       y = "Mosquito abundance") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 0.5, vjust = 0.5),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12),
+    legend.position = c(0.1, 0.8),  # Adjust the values to move the legend
+    legend.box = "horizontal",  # Use "vertical" for a vertical box
+    legend.box.background = element_rect(color = "black", size = 1)  # Rectangle around the legend
+  ) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+plot.sa
+
+
+# Install and load the 'cowplot' package
+library(cowplot)
+
+# Adjust legend size and position for each plot
+plot.alg1 <- plot.alg + theme(legend.position = c(0.25, 0.6))
+plot.sa1 <- plot.sa + theme(legend.position = "None")
+plot.kenya1 <- plot.kenya + theme(legend.position = "None")
+plot.gh1 <- plot.gh + theme(legend.position = "None")
+
+library(patchwork)
+# Combine the plots using the patchwork package
+combined_plots1 <- (plot.alg1 | plot.sa1) / (plot.kenya1 | plot.gh1)
+
+# Print the combined plots
+print(combined_plots1)
+
+
+# Save plot
+#ggsave(combined_plots1, filename = "constant_and_seasonal_env_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+
+
+```
+
+
+## Comparing regional differences in adult population dynamics 
+
+The graph is plotted from data that was generated after running the model for 5 years. The 5th year generates this plot. We do this to allow initial conditions to neutralize in the system and the system going to kind of equilibrium. 
+
+- Think about why this Fig. is important for the research objectives.
+
+
+```{r}
+# Regional population dynamics of adult mosquitoes
+
+# Load package that helps to load data
+library(rio)
+
+# Adult abundance data for different regions
+df.alg <- import("/Users/jbaafi/Documents/Github/population-model/data/df_algeria.csv")
+df.gh <- import("/Users/jbaafi/Documents/Github/population-model/data/df_ghana.csv")
+df.kenya <- import("/Users/jbaafi/Documents/Github/population-model/data/df_kenya.csv")
+df.sa <- import("/Users/jbaafi/Documents/Github/population-model/data/df_SA.csv")
+
+# Another saved data (used in the next chunk)
+ #df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_alg.csv")
+# df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_gh.csv")
+# df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_kenya.csv")
+# df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/fixed.condt_sa.csv")
+
+
+df2 <- data.frame(time = df.alg$time, Algeria=df.alg$total.adults, Ghana=df.gh$total.adults, Kenya=df.kenya$total.adults, 
+                  South.Africa=df.sa$total.adults)
+
+df2 <- df2[1460:nrow(df2), ]
+
+df2 <- df2 %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+ggp <- ggplot(df2, aes(x=time, y=population, col = Region))+
+  geom_line()+
+  xlab("Time (days)") +
+  ylab("Female adult abundance") +
+  ggtitle("Number of female adult mosquitoes in different regions") +
+  theme_bw()
+
+ggp +                               # Set origin of axes to zero
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+# At this point, I will change time on x-axis from days to months
+
+df2 <- df2 %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df2$y) * 1.1
+
+adult <- ggplot(df2, aes(x, y, col = Region)) +
+  geom_line(lwd = 1) +
+  labs(title = "",
+       x = "",
+       y = "Number of adults") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 10, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 10),
+        text = element_text(size = 10)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit))
+
+adult
+
+# Save the plot
+
+#ggsave(adult, filename = "adult_abundance.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+```{r}
+# Regional population dynamics of adult mosquitoes
+
+# Load package that helps to load data
+library(rio)
+
+# Another saved data
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+
+df2 <- data.frame(time = df.alg$time, Algeria=df.alg$vary.total.adults, Ghana=df.gh$vary.total.adults, Kenya=df.kenya$vary.total.adults, South.Africa=df.sa$vary.total.adults)
+
+df2 <- df2[1461:nrow(df2), ]
+
+df2 <- df2 %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+ggp <- ggplot(df2, aes(x=time, y=population, col = Region))+
+  geom_line()+
+  xlab("Time (days)") +
+  ylab("Female adult abundance") +
+  ggtitle("Number of female adult mosquitoes in different regions") +
+  theme_bw()
+
+ggp +                               # Set origin of axes to zero
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+# At this point, I will change time on x-axis from days to months
+
+df2 <- df2 %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+upper_limit <- max(df2$y) * 1.1
+
+# Define the colors you want to use for each region
+line_colors <- c("purple", "darkred", "orange", "darkgreen")
+
+# Your existing plot code
+adult <- ggplot(df2, aes(x, y, col = Region)) +
+  geom_line(lwd = 1) +
+  labs(title = "",
+       x = "",
+       y = "Number of adults") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 11, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 11),
+        text = element_text(size = 12)) +
+  scale_x_continuous(breaks = breakfunc, labels = labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, upper_limit)) +
+  scale_color_manual(values = line_colors)
+
+# Save the plot
+#ggsave(adult, filename = "adult_abundance.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+
+
+## Percentage of yearly adult total for each month.
+
+This is a 5 year average. 
+
+```{r}
+# Ain Mahbel, Algeria
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+
+# Calculate the total count of adult mosquitoes for the entire year
+yearly_total.alg <- sum(df.alg$vary.total.adults)
+
+# Create a column called count to data which is same as total adult numbers
+df.alg <- df.alg %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+mosquito_data <- df.alg %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a bar plot displaying the monthly percentages:
+ggplot(mosquito_data, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "red") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes") +
+  theme_bw()
+
+
+
+# Modify the plot
+ggplot(mosquito_data, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "red") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +  # Change size of y-axis label
+  xlab("Month") +  # Change size of x-axis label
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes") +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11),   # Change size of x-axis ticks
+        axis.text.y = element_text(size = 11),   # Change size of y-axis ticks
+        axis.title.x = element_text(size = 12),  # Change size of x-axis label
+        axis.title.y = element_text(size = 12))  # Change size of y-axis label
+
+```
+
+
+```{r}
+# Same as above for Ghana
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month and year information from the time column. Then, calculate the monthly percentages considering data from all five years:
+mosquito_data.gh <- df.gh %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2021-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(year, month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  group_by(month) %>%
+  summarise(yearly_total = sum(monthly_total)) %>%
+  mutate(monthly_percentage = (yearly_total / sum(yearly_total)) * 100)
+
+# Show the plot
+ggplot(mosquito_data.gh, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes") +
+  theme_bw()
+
+```
+
+
+
+```{r}
+# Same as above for Kenya
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month and year information from the time column. Then, calculate the monthly percentages considering data from all five years:
+mosquito_data.kenya <- df.kenya %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2021-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(year, month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  group_by(month) %>%
+  summarise(yearly_total = sum(monthly_total)) %>%
+  mutate(monthly_percentage = (yearly_total / sum(yearly_total)) * 100)
+
+# Show the plot
+ggplot(mosquito_data.kenya, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes")+
+  theme_bw()
+
+```
+
+
+```{r}
+# Same as above for SA
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month and year information from the time column. Then, calculate the monthly percentages considering data from all five years:
+mosquito_data.sa <- df.sa %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2021-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(year, month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  group_by(month) %>%
+  summarise(yearly_total = sum(monthly_total)) %>%
+  mutate(monthly_percentage = (yearly_total / sum(yearly_total)) * 100)
+
+# Show the plot
+ggplot(mosquito_data.sa, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes") +
+  theme_bw()
+
+```
+
+## Combine plots into single plot
+
+**1. Understanding the Y-Axis (Percentage of Yearly Total):
+Y-Axis Values: The y-axis represents the percentage of the total yearly adult mosquito population that each month contributes. Higher values indicate months with a larger proportion of mosquitoes, whereas lower values indicate months with a smaller proportion.
+2. Understanding the X-Axis (Months):
+Months: The x-axis represents the months of the year (from January to December). Each month's bar shows the percentage of mosquitoes for that specific month across all the years of data.
+3. Comparing Monthly Patterns Across Regions:
+Peak Months: Look for months with the tallest bars in each region. These months represent the periods when the mosquito population is at its peak in each region. Understanding which months have the highest percentages can indicate the months with the highest mosquito activity.
+
+Low Months: Conversely, months with shorter bars indicate periods when the mosquito population is relatively low. This could be due to factors such as colder weather or lower rainfall, which are less conducive to mosquito breeding.
+
+4. Comparing Seasonality Across Regions:
+Comparing Peaks: Compare the peak months across different regions. Do these peak months align? If not, it suggests variations in the seasonality of mosquito populations among regions.
+
+Comparing Patterns: Look for similarities or differences in the patterns between regions. For instance, if two regions show a peak in mosquito activity during the same months, it might indicate a common environmental trigger, such as rainy seasons or specific temperatures.
+
+5. Implications for Public Health and Vector Control:
+Disease Transmission: Understanding when mosquito populations are at their peak can help anticipate periods of higher disease transmission risk. It allows health authorities to implement targeted prevention and control measures, such as mosquito net distribution or insecticide spraying, during these high-risk months.
+
+Vector Control: Vector control programs can use this information to optimize their efforts. For example, during peak months, they might intensify mosquito surveillance, implement larval source reduction, or conduct targeted insecticide spraying to reduce the mosquito population.
+
+6. Environmental Insights:
+Climate Impact: Changes in mosquito patterns can be influenced by climate change. Comparing the plots over multiple years might provide insights into the impact of climate variability on mosquito populations.
+7. Limitations and Further Analysis:
+Data Quality: Consider the quality and consistency of the data. Sudden spikes or drops in percentages should be investigated for potential data anomalies or errors.
+
+Further Analysis: For a more comprehensive analysis, consider additional factors such as temperature, rainfall, or humidity data, which can help explain the observed patterns and provide a more accurate understanding of mosquito behavior.
+
+Interpreting these plots in the context of local climate patterns and disease epidemiology can provide valuable information for public health strategies, especially in regions where mosquito-borne diseases are a concern.
+
+
+```{r}
+
+# Assume you have separate data frames for each region: algeria_data, ghana_data, kenya_data, sa_data
+
+# Creating separate plots for each region
+plot_algeria <- ggplot(mosquito_data, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes in Algeria") 
+
+plot_ghana <- ggplot(mosquito_data.gh, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes in Ghana")
+
+plot_kenya <- ggplot(mosquito_data.kenya, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes in Kenya")
+
+plot_sa <- ggplot(mosquito_data.sa, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("Month") +
+  ggtitle("Monthly Percentage of Yearly Total Adult Mosquitoes in South Africa")
+
+# Arranging the plots in a grid using facet_wrap
+combined_plot <- cowplot::plot_grid(plot_algeria, plot_ghana, plot_kenya, plot_sa, ncol = 2)
+
+# Print the combined plot
+print(combined_plot)
+
+```
+
+
+```{r}
+# Same as previous chunk with a little modification to the code
+# Creating separate plots for each region
+plot_algeria <- ggplot(mosquito_data, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("") +
+  ggtitle("Algeria") +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12))
+
+plot_ghana <- ggplot(mosquito_data.gh, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "darkred") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("") +
+  xlab("") +
+  ggtitle("Ghana")  +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12))
+
+plot_kenya <- ggplot(mosquito_data.kenya, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("") +
+  ggtitle("Kenya")  +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12))
+
+plot_sa <- ggplot(mosquito_data.sa, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("") +
+  xlab("") +
+  ggtitle("South Africa") +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 11, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 11),
+    text = element_text(size = 12))
+
+# Arranging the plots in a grid using facet_wrap
+combined_plot <- cowplot::plot_grid(plot_algeria, plot_sa, plot_kenya, plot_ghana, ncol = 2)
+
+# Print the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "percentage_of_yearly_total.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+```{r, warning=FALSE, message=FALSE, fig.height=15, fig.width=25}
+# Same as previous chunk with a little modification to the code
+# Creating separate plots for each region
+plot_algeria <- ggplot(mosquito_data, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("") +
+  ggtitle("Algeria") +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 18, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 18),
+    text = element_text(size = 22))
+
+plot_ghana <- ggplot(mosquito_data.gh, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "darkred") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("") +
+  xlab("") +
+  ggtitle("Ghana")  +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 18, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 18),
+    text = element_text(size = 22))
+
+plot_kenya <- ggplot(mosquito_data.kenya, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Percentage of Yearly Total") +
+  xlab("") +
+  ggtitle("Kenya")  +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 18, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 18),
+    text = element_text(size = 22))
+
+plot_sa <- ggplot(mosquito_data.sa, aes(x = factor(month), y = monthly_percentage)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("") +
+  xlab("") +
+  ggtitle("South Africa") +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 18, angle = 60, hjust = 1),
+    axis.text.y = element_text(colour = "grey20", size = 18),
+    text = element_text(size = 22))
+
+# Arranging the plots in a grid using facet_wrap
+combined_plot <- cowplot::plot_grid(plot_algeria, plot_sa, plot_kenya, plot_ghana, ncol = 2)
+
+# Print the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "percentage_of_yearly_total.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+## Plot to investigate whether adult mosquito control needs to be concentrated across a few months or should be spread out over a year. 
+
+
+This is the chunk that produces the required figure for Algeria
+
+```{r}
+
+# Ain Mahbel, Algeria
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+
+# Calculate the total count of adult mosquitoes for the entire year
+#yearly_total.alg <- sum(df.alg$vary.total.adults)
+
+# Create a column called count to data which is same as total adult numbers
+df.alg <- df.alg %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+algeria_data <- df.alg %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+algeria_data <- algeria_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+algeria_sorted_data <- algeria_data[order(-algeria_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months = factor(algeria_sorted_data$months),
+                       monthly_percentage = algeria_sorted_data$monthly_percentage)
+
+
+algeria_data <- new_data %>% 
+  mutate(cum_fraction = cumsum(monthly_percentage))
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ggplot(algeria_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Fraction of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - Algeria") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+algeria_step_plot <- ggplot(algeria_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Percentage of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - Algeria") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(algeria_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+algeria_step_plot
+```
+From the figure above, it is clear that if you focus control interventions in the months of August, September and October, you control about 80% of the mosquito population. The months of November to April require mostly no interventions at all. This insight is really helpful for vector-borne disease control and optimal use of resources in this region. 
+
+
+This chunk produces the figure for Ghana
+```{r}
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+# Create a column called count to data which is same as total adult numbers
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+ghana_data <- df.gh %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+ghana_data <- ghana_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+ghana_sorted_data <- ghana_data[order(-ghana_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months = factor(ghana_sorted_data$months),
+                       monthly_percentage = ghana_sorted_data$monthly_percentage)
+
+
+ghana_data <- new_data %>% 
+  mutate(cum_fraction = cumsum(monthly_percentage))
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ggplot(ghana_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", linewidth = 1) +
+  ylab("Fraction of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - Ghana") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ghana_step_plot <- ggplot(ghana_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Percentage of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - Ghana") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(ghana_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+ghana_step_plot
+```
+
+It looks like controls should be focused all months across the year since we have a significant fraction of mosquitoes across the year.
+
+
+This chunk produces the figure for Kenya
+```{r}
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+
+# Create a column called count to data which is same as total adult numbers
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+kenya_data <- df.kenya %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+kenya_data <- kenya_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+kenya_sorted_data <- kenya_data[order(-kenya_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months = factor(kenya_sorted_data$months),
+                       monthly_percentage = kenya_sorted_data$monthly_percentage)
+
+
+kenya_data <- new_data %>% 
+  mutate(cum_fraction = cumsum(monthly_percentage))
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ggplot(kenya_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", linewidth = 1) +
+  ylab("Fraction of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - Kenya") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+kenya_step_plot <- ggplot(kenya_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Percentage of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - Kenya") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(kenya_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+kenya_step_plot
+```
+This also looks like we need to implement controls in each month across the year to keep mosquitoes numbers low and reduce the risk of disease spread. 
+
+
+This chunk produces the figure for SA
+```{r}
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+# Create a column called count to data which is same as total adult numbers
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+sa_data <- df.sa %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+sa_data <- sa_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+sa_sorted_data <- sa_data[order(-sa_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months = factor(sa_sorted_data$months),
+                       monthly_percentage = sa_sorted_data$monthly_percentage)
+
+
+sa_data <- new_data %>% 
+  mutate(cum_fraction = cumsum(monthly_percentage))
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ggplot(sa_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", linewidth = 1) +
+  ylab("Fraction of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+sa_step_plot <- ggplot(sa_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Percentage of adults (%)") +
+  xlab("Month") +
+  ggtitle("Cumulative sum of adult mosquitoes - SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(sa_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+sa_step_plot
+```
+
+
+Combine plots of cummulative sum of adult mosquitoes for different regions.
+
+```{r}
+
+# Creating separate plots for each region
+algeria_step_plot <- ggplot(algeria_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Percentage of adults (%)") +
+  xlab("") +
+  ggtitle("Algeria") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(algeria_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+ghana_step_plot <- ggplot(ghana_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("") +
+  xlab("") +
+  ggtitle("Ghana") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(ghana_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+kenya_step_plot <- ggplot(kenya_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("Percentage of adults (%)") +
+  xlab("Month") +
+  ggtitle("Kenya") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(kenya_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+sa_step_plot <- ggplot(sa_data, aes(x = months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("") +
+  xlab("Month") +
+  ggtitle("SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(sa_data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+# Arranging the plots in a grid using facet_wrap
+combined_step_plots <- cowplot::plot_grid(algeria_step_plot, ghana_step_plot, kenya_step_plot, sa_step_plot, ncol = 2)
+
+# Print the combined plot
+combined_step_plots
+
+#ggsave(combined_step_plots, filename = "step_plots.png", path = "/Users/jbaafi/Desktop/plots")
+
+```
+
+
+Now I want to put all the graphs into one plot. I am trying out code in the following chunks, no serious chunk yet. 
+
+```{r}
+
+library(ggtext)
+
+# Create a data frame with months and counts
+months_list <- month.abb
+count <- c(200, 250, 500, 100, 75, 80, 125, 100, 244, 400, 120, 98)
+
+numeric_months <- 1:12
+
+total_count <- sum(count) 
+
+# Calculate the fraction (percentage) of count for each month
+fraction <- count / total_count * 100
+
+# Create a new data frame with months, count, and fraction
+data <- data.frame(months = factor(months_list, levels = months_list[order(fraction, decreasing = TRUE)]), 
+                   numeric_months = numeric_months,
+                   count = count,
+                   fraction = fraction)
+# Reorder the data frame based on decreasing fraction
+sorted_data <- data[order(-data$fraction),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months = factor(sorted_data$months),
+                       ranked_months = factor(1:12),
+                       fraction = sorted_data$fraction)
+
+
+data <- new_data %>% 
+  mutate(cum_fraction = cumsum(fraction))
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ggplot(data, aes(x = ranked_months, y = cum_fraction, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("") +
+  xlab("Month") +
+  ggtitle("SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(data$cum_fraction)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+```
+
+
+```{r}
+# Create a data frame with months and counts
+months_list <- month.abb
+count <- c(2, 5, 100, 80, 95, 100, 150, 120, 10, 4, 12, 2)
+
+numeric_months <- 1:12
+
+total_count <- sum(count) 
+
+# Calculate the fraction (percentage) of count for each month
+fraction <- count / total_count * 100
+
+# Create a new data frame with months, count, and fraction
+data2 <- data.frame(months = factor(months_list, levels = months_list[order(fraction, decreasing = TRUE)]), 
+                   numeric_months = numeric_months,
+                   count = count,
+                   fraction = fraction)
+# Reorder the data frame based on decreasing fraction
+sorted_data2 <- data2[order(-data2$fraction),]
+
+# Save the reordered data as a new data frame
+new_data2 <- data.frame(months2 = factor(sorted_data2$months),
+                       ranked_months = factor(1:12),
+                       fraction2 = sorted_data2$fraction)
+
+
+data2 <- new_data2 %>% 
+  mutate(cum_fraction2 = cumsum(fraction2))
+
+
+# Plotting the stair step function with months on the x-axis and fraction of count on the y-axis
+ggplot(data2, aes(x = ranked_months, y = cum_fraction2, group = 1)) +
+  geom_step(color = "skyblue", size = 1) +
+  ylab("") +
+  xlab("Month") +
+  ggtitle("SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  ylim(0, max(data2$cum_fraction2)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+```
+
+I combine the previous two data and provide a combined plot. 
+
+```{r}
+#data
+#data2
+
+data_merged <- inner_join(data, data2) 
+
+# Plotting the stair step function with months on the x-axis and cum_fraction/cum_fraction2 on the y-axis
+ggplot(data_merged, aes(x = ranked_months, group = 1)) +
+  geom_step(aes(y = cum_fraction), color = "skyblue", size = 1) +
+  geom_step(aes(y = cum_fraction2), color = "lightgreen", size = 1) +
+  ylab("") +
+  xlab("Month") +
+  ggtitle("SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1)  # Add horizontal dashed line at y=50
+
+
+# Assuming cum_fraction and cum_fraction2 are columns in data_merged
+ggplot(data_merged, aes(x = ranked_months, group = 1)) +
+  geom_step(aes(y = cum_fraction, color = "Cum Fraction 1"), size = 1) +
+  geom_step(aes(y = cum_fraction2, color = "Cum Fraction 2"), size = 1) +
+  ylab("") +
+  xlab("Month") +
+  ggtitle("SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1) +  # Add horizontal dashed line at y=50
+  scale_color_manual(values = c("Cum Fraction 1" = "skyblue", "Cum Fraction 2" = "lightgreen"), 
+                     name = "Legend Title")  # Define colors and legend title
+
+
+ggplot(data_merged, aes(x = ranked_months, group = 1)) +
+  geom_step(aes(y = cum_fraction, color = "Cum Fraction 1"), size = 1) +
+  geom_step(aes(y = cum_fraction2, color = "Cum Fraction 2"), size = 1) +
+  ylab("") +
+  xlab("Month") +
+  ggtitle("SA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) +  # Rotate x-axis labels for better visibility
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1) +  # Add horizontal dashed line at y=50
+  scale_color_manual(values = c("Cum Fraction 1" = "skyblue", "Cum Fraction 2" = "lightgreen"), 
+                     name = "Legend Title") +  # Define colors and legend title
+  annotate("text", x = max(as.numeric(as.character(data_merged$ranked_months))), 
+           y = tail(data_merged$cum_fraction, 1), label = "Cum Fraction 1",
+           vjust = 6, hjust = 1, color = "skyblue") +  # Add label for Cum Fraction 1
+  annotate("text", x = max(as.numeric(as.character(data_merged$ranked_months))), 
+           y = tail(data_merged$cum_fraction2, 1), label = "Cum Fraction 2",
+           vjust = 0, hjust = 1, color = "lightgreen")  # Add label for Cum Fraction 2
+
+```
+
+Now I will use actual data to provide a plot similar to the ones above. 
+
+```{r}
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+# Calculate the total count of adult mosquitoes for the entire year
+#yearly_total.alg <- sum(df.alg$vary.total.adults)
+
+# Create a column called count to data which is same as total adult numbers
+df.alg <- df.alg %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+algeria_data <- df.alg %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+algeria_data <- algeria_data %>%
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+algeria_sorted_data <- algeria_data[order(-algeria_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months_alg = factor(algeria_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_alg = algeria_sorted_data$monthly_percentage,
+                       month_sorted_alg = algeria_sorted_data$month)
+
+
+algeria_data <- new_data %>% 
+  mutate(cum_fraction_alg = cumsum(monthly_percentage_alg))
+
+
+## ---------------------------------------- ----------------------------------------
+## Ghana follows here
+## ---------------------------------------- ----------------------------------------
+ 
+# Create a column called count to data which is same as total adult numbers
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+ghana_data <- df.gh %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+ghana_data <- ghana_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+ghana_sorted_data <- ghana_data[order(-ghana_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months_gh = factor(ghana_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_gh = ghana_sorted_data$monthly_percentage)
+
+
+ghana_data <- new_data %>% 
+  mutate(cum_fraction_gh = cumsum(monthly_percentage_gh))
+
+## ---------------------------------------- ----------------------------------------
+## Kenya follows here
+## ---------------------------------------- ----------------------------------------
+# Create a column called count to data which is same as total adult numbers
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+kenya_data <- df.kenya %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+kenya_data <- kenya_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+kenya_sorted_data <- kenya_data[order(-kenya_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months_kenya = factor(kenya_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_kenya = kenya_sorted_data$monthly_percentage)
+
+
+kenya_data <- new_data %>% 
+  mutate(cum_fraction_kenya = cumsum(monthly_percentage_kenya))
+
+## ---------------------------------------- ----------------------------------------
+## SA section here
+## ---------------------------------------- ----------------------------------------
+# Create a column called count to data which is same as total adult numbers
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+sa_data <- df.sa %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+sa_data <- sa_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+sa_sorted_data <- sa_data[order(-sa_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+new_data <- data.frame(months_sa = factor(sa_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_sa = sa_sorted_data$monthly_percentage)
+
+
+sa_data <- new_data %>% 
+  mutate(cum_fraction_sa = cumsum(monthly_percentage_sa))
+
+
+## ---------------------------------------- ----------------------------------------
+## Merge data and proceed to plot
+## ---------------------------------------- ----------------------------------------
+ 
+merged_data <- inner_join(algeria_data, ghana_data) %>% 
+  inner_join(kenya_data) %>% 
+  inner_join(sa_data)
+
+# Plot
+cum_plot <- ggplot(merged_data, aes(x = ranked_months, group = 1)) +
+  geom_step(aes(y = cum_fraction_alg, color = "Algeria"), size = 1) +
+  geom_step(aes(y = cum_fraction_gh, color = "Ghana"), size = 1) +
+  geom_step(aes(y = cum_fraction_kenya, color = "Kenya"), size = 1) +
+  geom_step(aes(y = cum_fraction_sa, color = "South Africa"), size = 1) +
+  ylab("Cummulative fraction of mosquitoes (%)") +
+  xlab("Months up to rank") +
+  ggtitle("") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) +  # Rotate x-axis labels for better visibility
+   ylim(0, max(merged_data$cum_fraction_alg)) + # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1) +  # Add horizontal dashed line at y=50
+  scale_color_manual(values = c("Algeria" = "yellow", "Ghana" = "red", "Kenya" = "orange", "South Africa" = "blue"), name = "Region") 
+
+cum_plot
+
+cummulative_plot <- ggplot(merged_data, aes(x = ranked_months, group = 1)) +
+  geom_step(aes(y = cum_fraction_alg, color = "Algeria"), size = 1.2, color = "purple") +
+  geom_step(aes(y = cum_fraction_gh, color = "Ghana"), size = 1.2, color = "darkred") +
+  geom_step(aes(y = cum_fraction_kenya, color = "Kenya"), size = 1.2, color = "orange") +
+  geom_step(aes(y = cum_fraction_sa, color = "South Africa"), size = 1.2, color = "darkgreen") +
+  ylab("Cumulative fraction of mosquitoes (%)") +
+  xlab("Months up to rank") +
+  ggtitle("") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 12),  # Adjust size as needed
+    axis.text.y = element_text(size = 12),  # Adjust size as needed
+    axis.title = element_text(size = 12),
+    text = element_text(size = 12),
+    legend.position = "none"  # Remove legend
+  ) +
+  ylim(0, max(merged_data$cum_fraction_alg)) +  # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1.2) +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_alg, 1),
+                label = "ALGR"),
+            vjust = -0.5, hjust = 6, color = "purple") +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_gh, 1),
+                label = "GHAN"),
+            vjust = 4, hjust = 5, color = "darkred") +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_kenya, 1),
+                label = "KENY"),
+            vjust = 6, hjust = 2, color = "orange") +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_sa, 1),
+                label = "SA"),
+            vjust = 5.4, hjust = 20, color = "darkgreen")
+
+print(cummulative_plot)
+
+
+
+#ggsave(cummulative_plot, filename = "cum_combined2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+The figure above is a typical of what I wanted. It shows the months where control should be focused to reduce the population of mosquitoes for different regions. From the Fig. above, we can see that the regions of Algeria and SA have more than half of the mosquito population for the entire year concentrated in two months. This implies that focusing controls in this months can significantly reduce the population and reduce disease spread.
+
+
+## Follow up figure 
+This figure explains the above figure by showing the month distribution for each region
+
+```{r}
+### --- This is just a trial code to attack the problem ---- ##
+
+# data frame
+df <- data.frame(region = rep("SA", 12),
+                 month = month.abb,
+                 rank = as.character(c(2, 4, 5, 8, 7, 10, 12, 1, 5, 3, 6, 9)),
+                 region2 = rep("Gh", 12),
+                 rank2 = as.character(c(5, 6, 8, 9, 2, 7, 1, 3, 4, 10, 12, 11)))
+
+# Convert the "rank" column to numeric
+df$rank <- as.numeric(df$rank)
+df$rank2 <- as.numeric(df$rank2)
+
+# Reorder the levels of the "month" factor
+df$month <- factor(df$month, levels = month.abb)
+
+# Create a combined point plot with rotated axes
+ggplot(df, aes(x = month)) +
+  geom_point(aes(y = factor(region), color = "SA"), shape = 0, size = 5) +  # Use shape 16 (filled square) for SA
+  geom_point(aes(y = factor(region2), color = "Gh"), shape = 0, size = 5) +   # Use shape 1 (hollow square) for Gh
+  labs(title = "Empty Square Point Plot of Ranks for SA and Gh Regions",
+       x = "Month",
+       y = "Region") +
+  scale_color_manual(values = c("SA" = "black", "Gh" = "black")) +  # Set color for SA and Gh
+  theme_bw() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1)) +
+  guides(color = FALSE)  # Remove the color legend
+
+
+# Create a combined point plot with rotated axes and a color legend
+ggplot(df, aes(x = month)) +
+  geom_point(aes(y = factor(region), color = rank), shape = 15, size = 5) +  # Use shape 15 (square) for SA
+  geom_point(aes(y = factor(region2), color = rank2), shape = 15, size = 5) +  # Use shape 15 (square) for Gh
+  geom_text(aes(y = factor(region), label = rank), vjust = 1.5, size = 3.5) +  # Add text labels for SA
+  geom_text(aes(y = factor(region2), label = rank2), vjust = 1.5, size = 3.5) +  # Add text labels for Gh
+  labs(title = "Heatmap of Ranks for SA and Gh Regions",
+       x = "Month",
+       y = "Region") +
+  scale_color_gradient(low = "lightblue", high = "darkblue", name = "Rank") +  # Set color scale
+  theme_bw() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1)) +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 11),  # Adjust size as needed
+    axis.text.y = element_text(size = 11),  # Adjust size as needed
+    axis.title = element_text(size = 12),
+    legend.text = element_text(size = 11)# Adjust size as needed
+  )
+```
+
+
+```{r}
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+# Create a column called count to data which is same as total adult numbers
+df.alg <- df.alg %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+algeria_data <- df.alg %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Create a vector of months of the year
+months_list <- month.abb
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+algeria_data <- algeria_data %>%
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+algeria_sorted_data <- algeria_data[order(-algeria_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+algeria_data <- data.frame(months_alg = factor(algeria_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_alg = algeria_sorted_data$monthly_percentage)
+
+# Define the month order using the constant month.abb
+month_order <- month.abb
+
+# Reorder the data frame based on the month order
+alg_ordered_data <- algeria_data[match(month_order, algeria_data$months_alg), ]
+
+alg_ordered_data <- alg_ordered_data %>% 
+  rename(month = months_alg, rank_alg = ranked_months) %>% 
+  mutate(region_alg = rep("ALGR"))
+
+## ---------------------------------------- ----------------------------------------
+## Ghana follows here
+## ---------------------------------------- ----------------------------------------
+ 
+# Create a column called count to data which is same as total adult numbers
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+ghana_data <- df.gh %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+ghana_data <- ghana_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+ghana_sorted_data <- ghana_data[order(-ghana_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+ghana_data <- data.frame(months_gh = factor(ghana_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_gh = ghana_sorted_data$monthly_percentage)
+
+# Reorder the data frame based on the month order
+gh_ordered_data <- ghana_data[match(month_order, ghana_data$months_gh), ]
+
+gh_ordered_data <- gh_ordered_data %>% 
+  rename(month = months_gh, rank_gh = ranked_months) %>% 
+  mutate(region_gh = rep("GHAN"))
+
+## ---------------------------------------- ----------------------------------------
+## Kenya follows here
+## ---------------------------------------- ----------------------------------------
+# Create a column called count to data which is same as total adult numbers
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+kenya_data <- df.kenya %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+kenya_data <- kenya_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+kenya_sorted_data <- kenya_data[order(-kenya_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+kenya_data <- data.frame(months_kenya = factor(kenya_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_kenya = kenya_sorted_data$monthly_percentage)
+
+# Reorder the data frame based on the month order
+kenya_ordered_data <- kenya_data[match(month_order, kenya_data$months_kenya), ]
+
+kenya_ordered_data <- kenya_ordered_data %>% 
+  rename(month = months_kenya, rank_kenya = ranked_months) %>% 
+  mutate(region_kenya = rep("KENY"))
+
+## ---------------------------------------- ----------------------------------------
+## SA section here
+## ---------------------------------------- ----------------------------------------
+# Create a column called count to data which is same as total adult numbers
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month information from the time column, then calculate the monthly percentages
+sa_data <- df.sa %>%
+  mutate(month = as.integer(format(as.Date(time, origin="2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count)) %>%
+  mutate(monthly_percentage = (monthly_total / sum(monthly_total)) * 100)
+
+# Add a column of months to the data and arrange months in decreasing order of monthly percentages
+sa_data <- sa_data %>% 
+  mutate(months = factor(months_list, levels = months_list[order(monthly_percentage, decreasing = TRUE)]))
+
+# Reorder the data frame based on decreasing fraction
+sa_sorted_data <- sa_data[order(-sa_data$monthly_percentage),]
+
+# Save the reordered data as a new data frame
+sa_data <- data.frame(months_sa = factor(sa_sorted_data$months),
+                       ranked_months = factor(1:12),
+                       monthly_percentage_sa = sa_sorted_data$monthly_percentage)
+
+# Reorder the data frame based on the month order
+sa_ordered_data <- sa_data[match(month_order, sa_data$months_sa), ]
+
+sa_ordered_data <- sa_ordered_data %>% 
+  rename(month = months_sa, rank_sa = ranked_months) %>% 
+  mutate(region_sa = rep("SA"))
+
+## ---------------------------------------- ----------------------------------------
+## Merge data and proceed to plot
+## ---------------------------------------- ----------------------------------------
+rank_data <- inner_join(alg_ordered_data, gh_ordered_data) %>% 
+  inner_join(kenya_ordered_data) %>% 
+  inner_join(sa_ordered_data)
+
+# Convert the "rank" column to numeric
+rank_data$rank_alg <- as.numeric(rank_data$rank_alg)
+rank_data$rank_gh <- as.numeric(rank_data$rank_gh)
+rank_data$rank_kenya <- as.numeric(rank_data$rank_kenya)
+rank_data$rank_sa <- as.numeric(rank_data$rank_sa)
+
+# Reorder the levels of the "month" factor
+rank_data$month <- factor(rank_data$month, levels = month.abb)
+
+# Create a point plot with rotated axes and a color legend
+ggplot(rank_data, aes(x = month)) +
+  geom_point(aes(y = factor(region_alg), color = rank_alg), shape = 15, size = 8) +  # Use shape 15 (square) for Algeria
+  geom_point(aes(y = factor(region_gh), color = rank_gh), shape = 15, size = 8) +  # Use shape 15 (square) for Ghana
+  geom_point(aes(y = factor(region_kenya), color = rank_kenya), shape = 15, size = 8) +  # Use shape 15 (square) for Ghana
+  geom_point(aes(y = factor(region_sa), color = rank_sa), shape = 15, size = 8) +  # Use shape 15 (square) for Ghana
+  geom_text(aes(y = factor(region_alg), label = rank_alg), vjust = 1, size = 4) +  # Add text labels for SA
+  geom_text(aes(y = factor(region_gh), label = rank_gh), vjust = 1, size = 4) +  # Add text labels for Gh
+  geom_text(aes(y = factor(region_kenya), label = rank_kenya), vjust = 1, size = 4) +  # Add text labels for SA
+  geom_text(aes(y = factor(region_sa), label = rank_sa), vjust = 1, size = 4) +  # Add text labels for Gh
+  labs(title = "Heatmap of Ranks for All the Regions",
+       x = "Month",
+       y = "Region") +
+  scale_color_gradient(low = "darkblue", high = "lightblue", name = "Rank") +  # Set color scale
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+# Same plot as above with an arrow added
+rank <- ggplot(rank_data, aes(x = month)) +
+  geom_point(aes(y = factor(region_alg), color = rank_alg), shape = 15, size = 8, alpha = 0.7) +
+  geom_point(aes(y = factor(region_gh), color = rank_gh), shape = 15, size = 8, alpha = 0.7) +
+  geom_point(aes(y = factor(region_kenya), color = rank_kenya), shape = 15, size = 8, alpha = 0.7) +
+  geom_point(aes(y = factor(region_sa), color = rank_sa), shape = 15, size = 8, alpha = 0.7) +
+  geom_text(aes(y = factor(region_alg), label = rank_alg), vjust = 0.5, hjust = 0.5, size = 6) +
+  geom_text(aes(y = factor(region_gh), label = rank_gh), vjust = 0.5, hjust = 0.5, size = 6) +
+  geom_text(aes(y = factor(region_kenya), label = rank_kenya), vjust = 0.5, hjust = 0.5, size = 6) +
+  geom_text(aes(y = factor(region_sa), label = rank_sa), vjust = 0.5, hjust = 0.5, size = 6) +
+  labs(title = "Heatmap of ranks for the regions",
+       x = "",
+       y = "Region") +
+  scale_color_gradient(low = "darkblue", high = "lightblue", name = "Rank") +
+  scale_alpha_continuous(range = c(0.3, 1)) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 12),
+  )
+
+rank
+
+#ggsave(rank, filename = "rank.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+
+
+
+```
+
+
+```{r}
+library(cowplot)
+library(magick)
+
+# Load saved figures
+plot_cummulative <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/cum_combined2.png", scale = 1)
+plot_rank <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/rank.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_cummulative <- plot_cummulative + draw_label("(a)", x = 0, y = 1, vjust = 6, hjust = 0, size = 14) # Adjust hjust to move closer to the figure
+numbered_plot_rank <- plot_rank + draw_label("(b)", x = 0, y = 1, vjust = 6, hjust = 0, size = 14) # Adjust hjust to move closer to the figure
+
+# Combine the plots with reduced margins
+combined_plot <- plot_grid(
+  numbered_plot_cummulative, 
+  numbered_plot_rank, 
+  ncol = 2,
+  rel_widths = c(1, 1),  # Adjust the relative widths of columns
+  rel_heights = c(1)  # Adjust the relative heights of rows
+) +
+theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))  # Adjust the margins
+
+# Display the combined plot
+print(combined_plot)
+
+#ggsave(combined_plot, filename = "cum_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+```{r}
+cummulative_plot <- ggplot(merged_data, aes(x = ranked_months, group = 1)) +
+  geom_step(aes(y = cum_fraction_alg, color = "Algeria"), size = 1.2, color = "purple") +
+  geom_step(aes(y = cum_fraction_gh, color = "Ghana"), size = 1.2, color = "darkred") +
+  geom_step(aes(y = cum_fraction_kenya, color = "Kenya"), size = 1.2, color = "orange") +
+  geom_step(aes(y = cum_fraction_sa, color = "South Africa"), size = 1.2, color = "darkgreen") +
+  ylab("Cumulative fraction of mosquitoes (%)") +
+  xlab("Months up to rank") +
+  ggtitle("") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 11),  # Adjust size as needed
+    axis.text.y = element_text(size = 11),  # Adjust size as needed
+    axis.title = element_text(size = 12),
+    legend.position = "none"  # Remove legend
+  ) +
+  ylim(0, max(merged_data$cum_fraction_alg)) +  # Set y-axis limits from 0 to the maximum cumulative fraction
+  geom_hline(yintercept = 50, linetype = "dashed", color = "red", size = 1.2) +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_alg, 1),
+                label = "ALGR"),
+            vjust = -0.5, hjust = 6, color = "purple") +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_gh, 1),
+                label = "GHAN"),
+            vjust = 4, hjust = 5, color = "darkred") +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_kenya, 1),
+                label = "KENY"),
+            vjust = 6, hjust = 2, color = "orange") +
+  geom_text(data = merged_data, 
+            aes(x = max(as.numeric(levels(ranked_months))), 
+                y = tail(cum_fraction_sa, 1),
+                label = "SA"),
+            vjust = 5.4, hjust = 20, color = "darkgreen")
+
+
+# Same plot as above with an arrow added
+rank <- ggplot(rank_data, aes(x = month)) +
+  geom_point(aes(y = factor(region_alg), color = rank_alg), shape = 15, size = 8, alpha = 0.7) +
+  geom_point(aes(y = factor(region_gh), color = rank_gh), shape = 15, size = 8, alpha = 0.7) +
+  geom_point(aes(y = factor(region_kenya), color = rank_kenya), shape = 15, size = 8, alpha = 0.7) +
+  geom_point(aes(y = factor(region_sa), color = rank_sa), shape = 15, size = 8, alpha = 0.7) +
+  geom_text(aes(y = factor(region_alg), label = rank_alg), vjust = 0.5, hjust = 0.5, size = 6) +
+  geom_text(aes(y = factor(region_gh), label = rank_gh), vjust = 0.5, hjust = 0.5, size = 6) +
+  geom_text(aes(y = factor(region_kenya), label = rank_kenya), vjust = 0.5, hjust = 0.5, size = 6) +
+  geom_text(aes(y = factor(region_sa), label = rank_sa), vjust = 0.5, hjust = 0.5, size = 6) +
+  labs(title = "Heatmap of ranks for the regions",
+       x = "",
+       y = "Region") +
+  scale_color_gradient(low = "darkblue", high = "lightblue", name = "Rank") +
+  scale_alpha_continuous(range = c(0.3, 1)) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 11),
+    axis.text.y = element_text(size = 11),
+    axis.title = element_text(size = 12),
+  )
+
+# Arranging the plots in a grid using facet_wrap
+combined_plots <- cowplot::plot_grid(cummulative_plot, rank, ncol = 2)
+
+# Print the combined plot
+print(combined_plots)
+```
+
+
+
+
+## Plot of the fraction of larvae to adult mosquitoes for each month across the year.
+
+Here, I try out code to attempt to produce the required plot. 
+
+```{r}
+
+#####-----------------------------------------------------------------------------
+# Plot fraction of adults
+#####-----------------------------------------------------------------------------
+library(rio)
+
+df.alg <- import("./data/df_algeria.csv")
+df.gh <- import("./data/df_ghana.csv")
+df.kenya <- import("./data/df_kenya.csv")
+df.sa <- import("./data/df_SA.csv")
+
+# Calculate the fraction of adult population at each time point. Algeria data
+total_population <- rowSums(df.alg[,c("eggs", "larvae", "pupae", "total.adults")])
+#fraction_adult <- df.alg[, "total.adults"] / total_population
+
+df.alg <- df.alg %>% 
+  mutate(fraction_adult = total.adults/total_population)
+
+# Ghana data
+total_pop.gh <- rowSums(df.gh[,c("eggs", "larvae", "pupae", "total.adults")])
+
+df.gh <- df.gh %>% 
+  mutate(fraction_adult = total.adults/total_pop.gh)
+
+# Kenya data
+total_pop.kenya <- rowSums(df.kenya[,c("eggs", "larvae", "pupae", "total.adults")])
+
+df.kenya <- df.kenya %>% 
+  mutate(fraction_adult = total.adults/total_pop.kenya)
+
+# SA data
+# Kenya data
+total_pop.SA <- rowSums(df.sa[,c("eggs", "larvae", "pupae", "total.adults")])
+
+df.sa <- df.sa %>% 
+  mutate(fraction_adult = total.adults/total_pop.SA)
+
+
+#-------------------------------------------------------------------------------
+# Plot fraction of population that are adults
+# -----------------------------------------------------------------------------
+frac.adult <- data.frame(time = df.alg$time, Algeria=df.alg$fraction_adult, Ghana=df.gh$fraction_adult, Kenya=df.kenya$fraction_adult, South.Africa=df.sa$fraction_adult)
+
+
+frac.adult <- frac.adult %>% 
+  pivot_longer(cols=c("Algeria", "Ghana", "Kenya", "South.Africa"),
+               names_to='Region',
+               values_to='population')
+
+ggp <- ggplot(frac.adult, aes(x=time, y=population, col = Region))+
+  geom_line(size = 1)+
+  xlab("Time (days)") +
+  ylab("Fraction of population") +
+  ggtitle("Fraction of female adults in different regions") +
+  theme_classic()
+
+ggp +                               # Set origin of axes to zero
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+# At this point, I will change time on x-axis from days to months
+
+frac.adult <- frac.adult %>% 
+  rename(
+    x = time,
+    y = population
+  )
+
+breakfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  days <- origin + x
+  origin <- as.POSIXlt(origin)
+  dayseq <- as.POSIXlt(seq(days[1], days[2], by = "day"))
+  with(dayseq, yday[mday == 1] + 365*(year[mday == 1] - origin$year ))
+}
+
+labelfunc <- function(x) {
+  origin <- as.Date("2021-01-01")
+  format(origin + x, format = "%b")
+}
+
+ggp2 <- ggplot(frac.adult, aes(x, y, col = Region)) +
+  geom_line(size = 1) +
+  labs(title = "Fraction of adult mosquitoes in different regions",
+       x = "",
+       y = "Fraction of adult mosquitoes") +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp2
+# Save the plot
+#ggsave("fraction_abundance.png", ggp2, path = "/Users/jbaafi/Desktop")
+
+
+###########=----------------------------------------
+# Comparing stage fractions
+# ----------------------------------------
+# Extract the number of mosquitoes in each stage
+E <- df.alg[, "eggs"]
+L <- df.alg[, "larvae"]
+P <- df.alg[, "pupae"]
+A <- df.alg[, "total.adults"]
+
+# Calculate the total number of mosquitoes at each time step
+N <- E + L + P + A
+
+# Calculate the fraction of mosquitoes in each stage
+frac_E <- E/N
+frac_L <- L/N
+frac_P <- P/N
+frac_A <- A/N
+
+df.alg <- df.alg %>% 
+  mutate(frac_E, frac_L, frac_P, frac_A)
+
+
+colors <- c("Larvae" = "blue", "Adult" = "red")
+
+ggp.alg <- ggplot(df.alg, aes(x = time)) +
+  geom_line(aes(y = frac_L, color = "Larvae"), size = 1) +
+  geom_line(aes(y = frac_A, color = "Adult"), size = 1) +
+  labs(x = "",
+       y = "Fraction of population",
+       color = "Legend", 
+       title = "Fraction of population in Algeria") +
+  scale_color_manual(values = colors) +
+  theme_classic()+
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp.alg
+
+#. ---------------------------------
+# Fraction for Ghana
+# ----------------------
+# Extract the number of mosquitoes in each stage
+E <- df.gh[, "eggs"]
+L <- df.gh[, "larvae"]
+P <- df.gh[, "pupae"]
+A <- df.gh[, "total.adults"]
+
+# Calculate the total number of mosquitoes at each time step
+N <- E + L + P + A
+
+# Calculate the fraction of mosquitoes in each stage
+frac_E <- E/N
+frac_L <- L/N
+frac_P <- P/N
+frac_A <- A/N
+
+df.gh <- df.gh %>% 
+  mutate(frac_E, frac_L, frac_P, frac_A)
+
+
+colors <- c("Larvae" = "blue", "Adult" = "red")
+
+ggp.gh <- ggplot(df.gh, aes(x = time)) +
+  geom_line(aes(y = frac_L, color = "Larvae"), size = 1) +
+  geom_line(aes(y = frac_A, color = "Adult"), size = 1) +
+  labs(x = "",
+       y = "Fraction of population",
+       color = "Legend", 
+       title = "Fraction of population in Ghana") +
+  scale_color_manual(values = colors) +
+  theme_classic()+
+  theme(axis.text.x = element_text(colour = "grey20", size = 12, angle = 60,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 12),
+        text = element_text(size = 16)) +
+  scale_x_continuous(breaks=breakfunc, labels=labelfunc, expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggp.gh
+
+```
+
+
+The chunk below show the fraction of larvae that emerge as adults. 
+
+This plot is great to demonstrate how temperature and rainfall influence the fraction of larvae that emerge as adults over time. The rate of emergence is highly dependent on the combined effects of temperature and rainfall. 
+Annotations are added to see the events that influence the fraction of larvae that emerge as adults. The pattern seen is consistent with theory. 
+
+```{r}
+library(rio)
+# This does prety same as before
+df.alg <- import("./data/df_algeria.csv")
+
+df.alg <- df.alg[1461:nrow(df.alg), ]
+
+mosquito_data <- df.alg
+mosquito_data$frac_emerge_adults <- mosquito_data$total.adults / mosquito_data$larvae
+
+# Modify the time column to start from 1
+mosquito_data$time <- seq_along(mosquito_data$time)
+
+# Temperature Plot
+p1 <- ggplot(mosquito_data, aes(x = time, y = temperature)) +
+  geom_line() +
+  labs(title = "Algeria",
+       x = "",
+       y = bquote("Temperature (" ~ degree ~ "C)")) +
+  theme_classic()
+
+# Rainfall Plot
+p2 <- ggplot(mosquito_data, aes(x = time, y = rainfall)) +
+  geom_line() +
+  labs(title = "",
+       x = "",
+       y = "Rainfall (mm)") +
+  theme_classic()
+
+
+# Fraction of Larvae Emerging as Adults Plot
+p3 <- ggplot(mosquito_data, aes(x = time, y = frac_emerge_adults)) +
+  geom_line(col = "purple", lwd = 1.5) +
+  labs(title = "",
+       x = "Time (days)",
+       y = "Fraction of larvae emerging as adults") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 12),
+    axis.text.y = element_text(colour = "grey20", size = 12),
+    text = element_text(size = 13)) +
+  ggtitle("Algeria")+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+# Annotate low and high temperature events
+low_temp_annotation <- annotate("text", x = 22, y = 0.15, label = "Low temp ", color = "red", size = 5)
+high_temp_annotation <- annotate("text", x = 204, y = 0.85, label = "High temp", color = "blue", size = 5)
+
+# Annotate low and high rainfall events
+low_rainfall_annotation <- annotate("text", x = 139, y = 0.1, label = "Low rainfall", color = "red", size = 5)
+high_rainfall_annotation <- annotate("text", x = 217, y = 0.8, label = "High rainfall", color = "blue", size = 5)
+
+# Combine the base plot and annotations
+p3 <- p3 + low_temp_annotation + high_temp_annotation + low_rainfall_annotation + high_rainfall_annotation
+
+library(gridExtra)
+
+# Combine Plots
+combined_plots <- grid.arrange(
+  p1, p2, p3,  # Replace p1, p2, p3 with your actual plot objects
+  ncol = 1  # Number of columns in the combined plot
+)
+
+p3
+ggsave(p3, filename = "larv_emerge_Algeria2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+
+```
+The plot below focuses on the proportion of mosquito that are larvae for each region. 
+It is inspired by Amy's sea lice paper. Refer to that paper for more indept explanation of this fig. 
+
+
+
+
+```{r}
+library(rio)
+# This does pretty same as before but utilizes data from Ghana
+df.gh <- import("./data/df_ghana.csv")
+
+df.gh <- df.gh[1461:nrow(df.gh), ]
+
+mosquito_data_gh <- df.gh
+mosquito_data_gh$frac_emerge_adults <- mosquito_data_gh$total.adults / mosquito_data_gh$larvae
+
+# Modify the time column to start from 1
+mosquito_data_gh$time <- seq_along(mosquito_data_gh$time)
+
+# Temperature Plot
+p1.gh <- ggplot(mosquito_data_gh, aes(x = time, y = temperature)) +
+  geom_line() +
+  labs(title = "Ghana",
+       x = "",
+       y = bquote("Temperature (" ~ degree ~ "C)"))+
+  theme_classic()
+
+# Rainfall Plot
+p2.gh <- ggplot(mosquito_data_gh, aes(x = time, y = rainfall)) +
+  geom_line() +
+  labs(title = "",
+       x = "",
+       y = "Rainfall (mm)") +
+  theme_classic()
+
+# Fraction of Larvae Emerging as Adults Plot
+p3.gh <- ggplot(mosquito_data_gh, aes(x = time, y = frac_emerge_adults)) +
+  geom_line(col = "darkred", lwd = 1.5) +
+  labs(title = " ",
+       x = "Time (days)",
+       y = "Fraction of larvae emerging as adults") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 12),
+    axis.text.y = element_text(colour = "grey20", size = 12),
+    text = element_text(size = 13)) +
+  ggtitle("Ghana")+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+# Annotate low and high temperature events
+low_temp_annotation <- annotate("text", x = 235, y = 0.33, label = "Low temp", color = "red", size = 5)
+high_temp_annotation <- annotate("text", x = 52, y = 0.48, label = "High temp", color = "blue", size = 5)
+
+# Annotate low and high rainfall events
+low_rainfall_annotation <- annotate("text", x = 17, y = 0.42, label = "Low rainfall", color = "red", size = 5)
+high_rainfall_annotation <- annotate("text", x = 200, y = 0.35, label = "High rainfall", color = "blue", size = 5)
+
+# Combine the base plot and annotations
+p3.gh <- p3.gh + low_temp_annotation + high_temp_annotation + low_rainfall_annotation + high_rainfall_annotation
+
+p3.gh
+ggsave(p3.gh, filename = "larv_emerge_ghana2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+
+```{r}
+library(rio)
+library(ggplot2)
+# This does pretty same as before but utilizes data from SA
+df.sa <- import("./data/df_SA.csv")
+
+df.sa <- df.sa[1461:nrow(df.sa), ]
+
+mosquito_data_sa <- df.sa
+mosquito_data_sa$frac_emerge_adults <- mosquito_data_sa$total.adults / mosquito_data_sa$larvae
+
+# Modify the time column to start from 1
+mosquito_data_sa$time <- seq_along(mosquito_data_sa$time)
+
+# Temperature Plot
+p1.sa <- ggplot(mosquito_data_sa, aes(x = time, y = temperature)) +
+  geom_line() +
+  labs(title = "South Africa",
+       x = "",
+       y = bquote("Temperature (" ~ degree ~ "C)")) +
+  theme_classic()
+
+# Rainfall Plot
+p2.sa <- ggplot(mosquito_data_sa, aes(x = time, y = rainfall)) +
+  geom_line() +
+  labs(y = "Rainfall (mm)",
+       x = "") +
+  theme_classic()
+
+# Fraction of Larvae Emerging as Adults Plot
+p3.sa <- ggplot(mosquito_data_sa, aes(x = time, y = frac_emerge_adults)) +
+  geom_line(col = "darkgreen", lwd = 1.5) +
+  labs(title = " ",
+       x = "Time (days)",
+       y = "Fraction of larvae emerging as adults") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 12),
+    axis.text.y = element_text(colour = "grey20", size = 12),
+    text = element_text(size = 13))+
+  ggtitle("South Africa")+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+# Find the row index where temperature is minimum
+min_row_temp <- which.min(mosquito_data_sa$temperature)
+
+# Access the time for the minimum rainfall
+time_for_min_temp <- mosquito_data_sa$time[min_row_temp]
+
+# Maximum temperature
+max_row_temp <- which.max(mosquito_data_sa$temperature)
+time_for_max_temp <- mosquito_data_sa$time[max_row_temp]
+
+# Annotate low and high temperature events
+low_temp_annotation <- annotate("text", x = time_for_min_temp, y = 0.1, label = "Low temp", color = "red", size = 5)
+high_temp_annotation <- annotate("text", x = time_for_max_temp, y = 0.15, label = "High temp", color = "blue", size = 5)
+
+# Find the row index where rainfall is minimum
+min_row_rain <- which.min(mosquito_data_sa$rainfall)
+
+# Access the time for the minimum rainfall
+time_for_min_rain <- mosquito_data_sa$time[min_row_rain]
+
+# Maximum rainfall
+max_row_rain <- which.max(mosquito_data_sa$rainfall)
+time_for_max_rain <- mosquito_data_sa$time[max_row_rain]
+
+# Annotate low and high rainfall events
+low_rainfall_annotation <- annotate("text", x = time_for_min_rain, y = 0.1, label = "Low rainfall", color = "red", size = 4.2)
+high_rainfall_annotation <- annotate("text", x = time_for_max_rain, y = 0.15, label = "High rainfall", color = "blue", size = 5)
+
+# Combine the base plot and annotations
+p3.sa <- p3.sa + low_temp_annotation + high_temp_annotation + low_rainfall_annotation + high_rainfall_annotation
+
+library(gridExtra)
+
+# Combine Plots
+combined_plots_sa <- grid.arrange(
+  p1.sa, p2.sa, p3.sa,  # Replace p1, p2, p3 with your actual plot objects
+  ncol = 1  # Number of columns in the combined plot
+)
+
+p3.sa
+
+ggsave(p3.sa, filename = "larv_emerge_sa2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+ 
+```{r}
+library(rio)
+library(ggplot2)
+# This does pretty same as before but utilizes data from SA
+df.kenya <- import("./data/df_kenya.csv")
+
+df.kenya <- df.kenya[1461:nrow(df.kenya), ]
+
+mosquito_data_kenya <- df.kenya
+mosquito_data_kenya$frac_emerge_adults <- mosquito_data_kenya$total.adults / mosquito_data_kenya$larvae
+
+# Modify the time column to start from 1
+mosquito_data_kenya$time <- seq_along(mosquito_data_kenya$time)
+
+# Temperature Plot
+p1.kenya <- ggplot(mosquito_data_kenya, aes(x = time, y = temperature)) +
+  geom_line() +
+  labs(title = "Kenya",
+       x = "",
+       y = bquote("Temperature (" ~ degree ~ "C)")) +
+  theme_classic()
+
+# Rainfall Plot
+p2.kenya <- ggplot(mosquito_data_kenya, aes(x = time, y = rainfall)) +
+  geom_line() +
+  labs(y = "Rainfall (mm)",
+       x = "") +
+  theme_classic()
+
+# Fraction of Larvae Emerging as Adults Plot
+p3.kenya <- ggplot(mosquito_data_kenya, aes(x = time, y = frac_emerge_adults)) +
+  geom_line(col = "orange", lwd = 1.5) +
+  labs(title = " ",
+       x = "Time (days)",
+       y = "Fraction of larvae emerging as adults") +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(colour = "grey20", size = 12),
+    axis.text.y = element_text(colour = "grey20", size = 12),
+    text = element_text(size = 13))+
+  ggtitle("Kenya")+
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+# Find the row index where temperature is minimum
+min_row_temp <- which.min(mosquito_data_kenya$temperature)
+
+# Access the time for the minimum rainfall
+time_for_min_temp <- mosquito_data_kenya$time[min_row_temp]
+
+# Maximum temperature
+max_row_temp <- which.max(mosquito_data_kenya$temperature)
+time_for_max_temp <- mosquito_data_kenya$time[max_row_temp]
+
+# Annotate low and high temperature events
+low_temp_annotation <- annotate("text", x = time_for_min_temp, y = 0.3, label = "Low temp", color = "red", size = 5)
+high_temp_annotation <- annotate("text", x = time_for_max_temp, y = 0.53, label = "High temp", color = "blue", size = 5)
+
+# Find the row index where rainfall is minimum
+min_row_rain <- which.min(mosquito_data_kenya$rainfall)
+
+# Access the time for the minimum rainfall
+time_for_min_rain <- mosquito_data_kenya$time[min_row_rain]
+
+# Maximum rainfall
+max_row_rain <- which.max(mosquito_data_kenya$rainfall)
+time_for_max_rain <- mosquito_data_kenya$time[max_row_rain]
+
+# Annotate low and high rainfall events
+low_rainfall_annotation <- annotate("text", x = time_for_min_rain, y = 0.44, label = "Low rainfall", color = "red", size = 5)
+high_rainfall_annotation <- annotate("text", x = time_for_max_rain, y = 0.32, label = "High rainfall", color = "blue", size = 5)
+
+# Combine the base plot and annotations
+p3.kenya <- p3.kenya + low_temp_annotation + high_temp_annotation + low_rainfall_annotation + high_rainfall_annotation
+
+library(gridExtra)
+
+# Combine Plots
+combined_plots_kenya <- grid.arrange(
+  p1.kenya, p2.kenya, p3.kenya,  # Replace p1, p2, p3 with your actual plot objects
+  ncol = 1  # Number of columns in the combined plot
+)
+
+p3.kenya
+
+ggsave(p3.kenya, filename = "larv_emerge_kenya2.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+The plot from SA and Algeria clearly demonstrate the effect of temperature and rainfall on mosquito larvae that develop to emerge as adults. 
+The plot for Ghana does not give a clear demonstration of this concept since temperature stays high across the year but it is fairly good.
+
+
+Still the main plot I wanted to do is not done yet. Continue to do the plot for the fraction of population that are adults and compare to the larvae pop.
+
+
+## A few notes:
+
+I think that the plot that investigates the fraction of larvae that emerge as adults over time gives a great insight into optimizing control strategies. The basic interpretation will be that adult control may have to be intensified in the periods where higher fraction of the larvae emerge as adult. Also much attention may be given to the period where only a small fraction of the larvae emerge as adult. In this case larvicides may be the best optimal control strategy to be implemented. 
+
+
+## Another section that plots total number of adult across the year
+
+This chunk only selects and plots the 5th year total and plots it.
+```{r}
+# Load data from various regions 
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+data <- data.frame(time = df.alg$time, 
+                   algeria = df.alg$vary.total.adults, 
+                   ghana = df.gh$vary.total.adults, 
+                   kenya = df.kenya$vary.total.adults, 
+                   sa = df.sa$vary.total.adults)
+
+
+data <- data[1461:nrow(data), ]
+
+# Calculate total adults for each region at the final time point
+total_adults <- data.frame(
+  Region = c("Algeria", "South Africa", "Kenya", "Ghana"),
+  total = c(sum(data$algeria), sum(data$sa), sum(data$kenya), sum(data$ghana))
+)
+
+# Create the bar plot without legend
+total <- ggplot(total_adults, aes(x = Region, y = total, fill = Region)) +
+  geom_bar(stat = "identity", color = "black", width = 0.3, alpha = 0.85) +
+  scale_fill_manual(values = c("Algeria" = "yellow", "South Africa" = "blue", "Kenya" = "orange", "Ghana" = "red")) +
+  theme_classic() + 
+  scale_y_continuous(bquote("Mosquito abundance" ~ (x ~ 10^5)), breaks = seq(0, 5, 1) * 1e5, labels = seq(0, 5, 1)) +
+  theme(legend.position = "none") +
+  ggtitle("Estimated total number of mosquitoes")
+
+total
+
+#ggsave(total, filename = "total_adults.png", path = "/Users/jbaafi/Desktop/plots")
+
+```
+
+
+This chunk combines some saved figures into rows and columns to be included in the manuscript
+```{r}
+library(cowplot)
+library(magick)
+
+# Load your saved figures
+# Load your saved figures
+
+plot_adult <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/adult_abundance.png", scale = 1)
+plot_total <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/total_adults.png", scale = 1)
+plot_algeria <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larv_emerge_Algeria2.png", scale = 1)
+plot_sa <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larv_emerge_sa2.png", scale = 1)
+plot_kenya <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larv_emerge_kenya2.png", scale = 1)
+plot_ghana <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/larv_emerge_ghana2.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_adult <- plot_adult + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14) 
+numbered_plot_total <- plot_total + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_algeria <- plot_algeria + draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_sa <- plot_sa + draw_label("(d)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_kenya <- plot_kenya + draw_label("(e)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_ghana <- plot_ghana + draw_label("(f)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_adult, 
+  numbered_plot_total, 
+  numbered_plot_algeria, 
+  numbered_plot_sa, 
+  numbered_plot_kenya, 
+  numbered_plot_ghana, 
+  ncol = 2
+)
+
+# Display the combined plot
+print(combined_plot)
+
+ggsave(combined_plot, filename = "Fig3_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+This chunk plots the average of the 5 years and plot it. Similar to the previous except that here, we are plotting 5 year average.
+```{r}
+# Load data from various regions 
+df.alg <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_alg.csv")
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+df.alg <- df.alg %>% 
+  mutate(count = vary.total.adults)
+
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+library(lubridate)
+
+mosquito_data.alg <- df.alg %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+mosquito_data.gh <- df.gh %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+mosquito_data.kenya <- df.kenya %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+mosquito_data.sa <- df.sa %>%
+  mutate(date = as.Date(time, origin = "2019-01-01"),
+         year = year(date),
+         month = month(date)) %>%
+  group_by(year) %>%
+  summarise(yearly_total = sum(count))
+
+
+# Calculate total adults for each region at the final time point
+df_average_mosquito <- data.frame(
+  Region = c("Algeria", "South Africa", "Kenya", "Ghana"),
+  average_count = c(mean(mosquito_data.alg$yearly_total), 
+                    mean(mosquito_data.sa$yearly_total), 
+                    mean(mosquito_data.kenya$yearly_total),
+                    mean(mosquito_data.gh$yearly_total))
+)
+
+# Create the bar plot without legend
+abundance <- ggplot(df_average_mosquito, aes(x = Region, y = average_count, fill = Region)) +
+  geom_bar(stat = "identity", color = "black", width = 0.3, alpha = 0.85) +
+  scale_fill_manual(values = c("Algeria" = "purple", "South Africa" = "darkgreen", "Kenya" = "orange", "Ghana" = "darkred")) +
+  theme_classic() + 
+  scale_y_continuous(bquote("Mosquito abundance" ~ (x ~ 10^5)), breaks = seq(0, 5, 1) * 1e5, labels = seq(0, 5, 1)) +
+  theme(legend.position = "none") +
+  ggtitle("Average Estimated Mosquito Abundance for Five Years")+
+  theme(axis.text.x = element_text(colour = "grey20", size = 14, angle = 0,
+                                   hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(colour = "grey20", size = 14),
+        text = element_text(size = 16),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(labels = c("Algeria" = "ALGR",
+                              "Ghana" = "GHAN",
+                              "Kenya" = "KENY",
+                              "South Africa" = "SA"))
+
+abundance
+#ggsave(abundance, filename = "total_adults.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+
+
+
+
+
+## Mosquito Count Data
+
+```{r}
+# The data comes from the Insect Control adult mosquito traps located in the City of Winnipeg and 10 km outside the city limits. The exact locations of the data have not been provided due to privacy issues. In the past, the file format has met FIPPA requirements. This data is updated daily.
+
+daily_mosq_data <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/daily mosquito data/Daily_Adult_Mosquito_Trap_Data.csv")
+
+
+mosq_larval_count_data <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/daily mosquito data/Mosquito_Larval_Counts.csv")
+
+ncol(daily_mosq_data)
+colnames(daily_mosq_data)
+
+```
+
+
+

@@ -1,0 +1,1020 @@
+---
+title: "Comparing Model to Mosquito Count Data"
+author: "jbaafi"
+date: "2024-01-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Monthly vector abundance in Kintampo, Ghana
+
+```{r}
+# Load packages
+pacman::p_load(ggplot2, dplyr)
+```
+
+```{r}
+# Create data frame of mosquito abundance collected in 2004
+gh_mosq_count_04 <- data.frame(
+  month = month.abb,
+  gambiae_04 = c(111, 62, 94, 77, 262, 60, 27, 131, 517, 226, 455, 23),
+  funestus_04 = c(30, 14, 37, 53, 213, 67, 414, 808, 1775, 1702, 1653, 0)
+)
+
+gh_mosq_count_04 <- gh_mosq_count_04 %>%
+  mutate(abundance_04 = gambiae_04 + funestus_04)
+ 
+# Mosquitoes collected in 2005
+gh_mosq_count_05 <- data.frame(
+  month = factor(month.abb),
+  gambiae_05 = c(7, 0, 0, 7, 51, 37, 80, 15, 37, 117, 15, 0),
+  funestus_05 = c(0, 15, 0, 14, 15, 102, 197, 124, 270, 482, 117, 7)
+)
+
+gh_mosq_count_05 <- gh_mosq_count_05 %>%
+  mutate(abundance_05 = gambiae_05 + funestus_05)
+```
+
+
+```{r}
+# Create a data frame with month_num and abundance
+df <- data.frame(
+  month_num = match(gh_mosq_count_04$month, month.abb),
+  month = factor(month.abb, levels = month.abb),
+  abundance_04 = gh_mosq_count_04$abundance_04
+)
+
+# Create a bar plot using ggplot without legend
+ggplot(df, aes(x = factor(month_num), y = abundance_04, fill = factor(month_num))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_x_discrete(labels = gh_mosq_count_04$month, name = "Month") +
+  ylab("Abundance") +
+  ggtitle("Abundance of Mosquitoes Over Months") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Create a time series line plot using ggplot with geom_line()
+ggplot(df, aes(x = month, y = abundance_04, group = 1)) +
+  geom_line() +
+  geom_point() +
+  xlab("Month") +
+  ylab("Abundance") +
+  ggtitle("Monthly mosquito abundance in Kintampo, Ghana (2004") +
+  theme_bw()
+
+```
+
+
+```{r}
+# Create a data frame with month and abundance
+df2 <- data.frame(
+  month = factor(month.abb, levels = month.abb),
+  abundance_05 = gh_mosq_count_05$abundance_05
+)
+
+# Create a time series line plot using ggplot with geom_line()
+ggplot(df2, aes(x = month, y = abundance_05, group = 1)) +
+  geom_line() +
+  geom_point() +
+  xlab("Month") +
+  ylab("Abundance") +
+  ggtitle("Monthly mosquito abundance in Kintampo, Ghana (2005)") +
+  theme_bw()
+
+
+
+```
+
+```{r}
+# Combine data df and df2 which is the mosquito count data for 2004 and 2005 respectively
+gh_data_combined <- inner_join(df, df2)
+
+gh_data_combined <- gh_data_combined %>% 
+  mutate(average_count = (abundance_04 + abundance_05)/2)
+
+# Create a time series line plot using ggplot with geom_line()
+ggplot(gh_data_combined, aes(x = month, y = average_count, group = 1)) +
+  geom_line() +
+  geom_point() +
+  xlab("Month") +
+  ylab("Abundance") +
+  ggtitle("Monthly mosquito abundance in Kintampo, Ghana (2004 - 2005)") +
+  theme_bw()
+
+```
+
+ 
+```{r}
+# Plot data for 2004 and 2005 on the same graph with the average for the two years. 
+
+gh_data_combined <- gh_data_combined %>% 
+  select(-month_num)
+
+# Load package
+library(tidyr)
+
+# Reshape the data
+gh_long_data <- gather(gh_data_combined, key = "variable", value = "value", -month)
+
+# Create a line plot
+ggplot(gh_long_data, aes(x = month, y = value, color = variable, group = variable)) +
+  geom_line() +
+  geom_point() +
+  xlab("Month") +
+  ylab("Abundance") +
+  ggtitle("Mosquito Abundance Over Months") +
+  theme_minimal()
+
+```
+ 
+```{r}
+# Reshape the data
+# Order months starting from December
+gh_long_data$month <- factor(gh_long_data$month, levels = c("Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov"))
+
+# Create a line plot
+ggplot(gh_long_data, aes(x = month, y = value, color = variable, group = variable)) +
+  geom_line() +
+  geom_point() +
+  xlab("Month") +
+  ylab("Abundance") +
+  ggtitle("Abundance Over Months") +
+  theme_minimal()
+
+```
+ 
+ 
+```{r}
+# ==========================================================================================
+# Now I want to reshape the simulated data to be able to compare the pattern to the mosquito count data above
+# ==========================================================================================
+
+# Here I select only the first year to find the monthly abundance
+
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+#df.gh <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+# subset data
+subset_data <- df.gh %>% slice(1:366)
+
+
+# Extract the month and year information from the time column. Then, calculate the monthly totals
+data <- subset_data %>%
+  mutate(month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(month) %>%
+  summarise(monthly_total = sum(count))
+
+ggplot(data, aes(x = factor(month), y = monthly_total)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  scale_x_discrete(
+    breaks = 1:12,
+    labels = month.abb
+  ) +
+  ylab("Monthly Total Mosquitoes") +
+  xlab("Month") +
+  ggtitle("Monthly Total Adult Mosquitoes") +
+  theme_bw()
+
+# Create a time series line plot using ggplot with geom_line()
+ggplot(data, aes(x = factor(month), y = monthly_total, group = 1)) +
+  geom_line(col = "red") +
+  geom_point() +
+  xlab("Month") +
+  ylab("Abundance") +
+  ggtitle("Monthly mosquito abundance in Kintampo, Ghana (2004 - 2005)") +
+  theme_bw()
+
+```
+
+
+```{r}
+# I averaged the data for 5 years
+df.gh <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+#df.gh <- read.csv("/Users/josephbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_gh.csv")
+
+df.gh <- df.gh %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month and year information from the time column. Then, calculate the monthly totals considering data from all five years:
+mosquito_data.gh <- df.gh %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2021-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(year, month) %>%
+  summarise(monthly_total = sum(count)) 
+
+# Now I want to separate the data so that I can find the average count for the years the model simulate
+mosquito_abundance_2021 <- mosquito_data.gh %>% 
+  filter(year==2021) %>% 
+  rename(monthly_total_21 = monthly_total) 
+
+mosquito_abundance_2022 <- mosquito_data.gh %>% 
+  filter(year == 2022)%>% 
+  rename("year_22" = year, monthly_total_22 = monthly_total)
+
+mosquito_abundance_2023 <- mosquito_data.gh %>% 
+  filter(year==2023)%>% 
+  rename("2023" = year, monthly_total_23 = monthly_total)
+
+mosquito_abundance_2024 <- mosquito_data.gh %>% 
+  filter(year==2024)%>% 
+  rename("2024" = year, monthly_total_24 = monthly_total)
+
+mosquito_abundance_2025 <- mosquito_data.gh %>% 
+  filter(year==2025)%>% 
+  rename("2025" = year, monthly_total_25 = monthly_total)
+
+# Join all these data to form a wide data frame
+mosquito_abundace_all <- inner_join(mosquito_abundance_2021, mosquito_abundance_2022) %>% 
+  inner_join(mosquito_abundance_2023) %>% 
+  inner_join(mosquito_abundance_2024) %>% 
+  inner_join(mosquito_abundance_2025)
+
+# Calculate the average monthly abundance for the entire 5 years.
+mosquito_average_abund <- mosquito_abundace_all %>% 
+  mutate(monthly_average = (monthly_total_21 + monthly_total_22 + monthly_total_23 + monthly_total_24 + monthly_total_24)/5)
+
+
+# Show the plot
+ggplot(mosquito_average_abund, aes(x = factor(month), y = monthly_average)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  scale_x_discrete(labels = month.abb) +
+  ylab("Monthly total avaraged") +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years") +
+  theme_bw()
+
+ggplot(mosquito_average_abund, aes(x = factor(month), y = monthly_average)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  scale_x_discrete(labels = month.abb) +
+  scale_y_continuous(
+    breaks = seq(1, 5, 1) * 1e4,
+    labels = seq(1, 5, 1)
+  ) +
+  ylab(bquote("Mosquitoes abundance" ~ (x ~ 10^4))) +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years") +
+  theme_bw()
+
+# Assuming 'mosquito_average_abund' is your data frame
+ggplot(mosquito_average_abund, aes(x = factor(month), y = monthly_average, group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue") +
+  scale_x_discrete(labels = month.abb) +
+  scale_y_continuous(
+    breaks = seq(1, 5, 1) * 1e4,
+    labels = seq(1, 5, 1)
+  ) +
+  ylab(bquote("Mosquitoes abundance" ~ (x ~ 10^4))) +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years") +
+  theme_bw()
+
+```
+
+```{r}
+# Join data in the two previous chunks and plot with real mosquito count data
+
+gh_data_combined # mosquito count data
+#gh_long_data # in the long form 
+
+mosquito_average_abund # simulated data averaged across 5 years
+
+mosquito_average_abund <- mosquito_average_abund %>% 
+  mutate(month = month.abb)
+
+mosq_abund_df <- inner_join(mosquito_average_abund, gh_data_combined)
+
+names(mosq_abund_df)
+
+mosq_abund_df <- mosq_abund_df %>% 
+  select(month, monthly_average, abundance_04, abundance_05, average_count)
+
+mosq_abund_df <- data.frame(month = mosq_abund_df$month,
+                       sim_monthly_average = mosq_abund_df$monthly_average,
+                       mosq_count_04 = mosq_abund_df$abundance_04,
+                       mosq_count_05 = mosq_abund_df$abundance_05,
+                       average_count = mosq_abund_df$average_count,
+                       sim_one_year_pop = data$monthly_total)
+
+all_data_long <- gather(mosq_abund_df, key = "variable", value = "value", -month)
+```
+
+
+The following chuncks are all examples of what people have done that I found on the internet (https://stackoverflow.com/questions/3099219/ggplot-with-2-y-axes-on-each-side-and-different-scales)
+
+
+```{r}
+# Load package
+library(lubridate)
+
+# Data frame
+mosquito_pop_df <- data.frame(month = month.abb,
+                              simulated.pop = c(17389.92, 11938.31, 17582.14, 27186.08, 32187.59, 21597.28, 11158.46, 8591.64, 15785.97, 35620.47, 47782.73, 38107.79),
+                              real_pop = c(74, 45.5, 65.5, 75.5, 270.5, 133, 359, 539, 1299.5, 1263.5, 1120, 15)
+                              )
+
+# Save data in a new variable name
+m.df <- mosquito_pop_df
+
+climate <- data.frame(
+  Month = 1:12,
+  month = m.df$month,
+  model = m.df$simulated.pop,
+  data = m.df$real_pop
+  )
+
+ylim.prim <- c(0, 50000)   # in this example, model
+ylim.sec <- c(0, 1400)    #in this example, data
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+ggplot(climate, aes(Month, model)) +
+  geom_col() +
+  geom_line(aes(y = a + data*b), color = "red") +
+  scale_y_continuous("model", sec.axis = sec_axis(~ (. - a)/b, name = "data")) +
+  scale_x_continuous("Month", breaks = 1:12) +
+  theme(axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red")
+        ) +
+  ggtitle("Comparing Model to Data")
+
+
+mosq_count_and_model_ghana <- ggplot(climate, aes(Month)) +
+  geom_line(aes(y=model), color = "darkred", linewidth = 1) +
+  geom_line(aes(y = a + data * b), color = "blue", linetype = "dashed", linewidth = 1) +
+  scale_y_continuous(bquote("Model estimates" ~ (x ~ 10^4)), breaks = seq(0, 5, 1) * 1e4, labels = seq(0, 5, 1), sec.axis = sec_axis(~ (. - a)/b, name = "Mosquito count")) +
+  theme_classic() +
+  scale_x_continuous("", breaks = 1:12, labels = month.abb) +  # Use month.abb for month names
+  theme(
+    axis.line.y.left = element_line(color = "darkred"), 
+    axis.ticks.y.left = element_line(color = "darkred"),
+    axis.text.y.left = element_text(color = "darkred"), 
+    axis.title.y.left = element_text(color = "darkred"),
+    axis.line.y.right = element_line(color = "blue"), 
+    axis.ticks.y.right = element_line(color = "blue"),
+    axis.text.y.right = element_text(color = "blue"), 
+    axis.title.y.right = element_text(color = "blue"),
+    axis.text.x = element_text(size = 12, angle = 60, hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(size = 12),
+    text = element_text(size = 13)
+  ) +
+  ggtitle("Comparing model estimates to mosquito count data from Ghana")
+
+mosq_count_and_model_ghana
+
+#ggsave(mosq_count_and_model_ghana, filename = "compare_mosq_count_and_model_ghana.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+The above foigure was produced from data collected from Kintampo in the Brong-Ahafo region of Ghana which is a little away from Kumasi, where the weather data was recorded and used in the model. We observe that they have two peaks. In may the model agrees with the mosquito count but for the next peak, the model predicts another peak in November while the actual count data prodicts a peak in September and October. This count data is actually the average count for count data recorded in 2004 and 2005 and it was taken from literature (site). It is observed that after November, the mosquito abundance begin to decline till February where it begins to increase but at a low level for both the count data and the model estimates.  
+ 
+
+```{r}
+## ===================================================================================
+# This chunk do the ploting with real data as bar plot and simulated data as line plot
+## ===================================================================================
+
+dtf <- mosquito_pop_df
+
+dtf <- data.frame(
+  Month = 1:12,
+  model = dtf$simulated.pop,
+  data = dtf$real_pop
+  )
+
+ylim.prim <- c(0, 1400)   # in this example, model
+ylim.sec <- c(0, 45000)    #in this example, data
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+
+ggplot(dtf, aes(Month, data)) +
+  geom_col() +
+  geom_line(aes(y = a + model*b), color = "red") +
+  scale_y_continuous("data", sec.axis = sec_axis(~ (. - a)/b, name = "model")) +
+  scale_x_continuous("Month", breaks = 1:12, labels = month.abb) +
+  theme(axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red")
+        ) +
+  ggtitle("Comparing Model to Data")
+
+
+```
+ 
+
+```{r}
+# This chunk does the same job as the immediate previous chunk in a different way.
+
+library(scales)
+
+dtf2 <- dtf # This is the data above, I just changed the name.
+
+# Function factory for secondary axis transforms
+train_sec <- function(primary, secondary, na.rm = TRUE) {
+  # Thanks Henry Holm for including the na.rm argument!
+  from <- range(secondary, na.rm = na.rm)
+  to   <- range(primary, na.rm = na.rm)
+  # Forward transform for the data
+  forward <- function(x) {
+    rescale(x, from = from, to = to)
+  }
+  # Reverse transform for the secondary axis
+  reverse <- function(x) {
+    rescale(x, from = to, to = from)
+  }
+  list(fwd = forward, rev = reverse)
+}
+
+sec <- with(dtf2, train_sec(model, data))
+
+# Plot the data
+ggplot(dtf2, aes(Month)) +
+  geom_line(aes(y = model)) +
+  geom_line(aes(y = sec$fwd(data)), colour = "red") +
+  scale_y_continuous(sec.axis = sec_axis(~sec$rev(.), name = "data"))+
+  scale_x_continuous("Month", breaks = 1:12, labels = month.abb) +
+  theme(
+    axis.line.y.right = element_line(color = "red"),
+    axis.ticks.y.right = element_line(color = "red"),
+    axis.text.y.right = element_text(color = "red"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("Comparing Model to Data")
+
+
+ggplot(dtf2, aes(Month)) +
+  geom_line(aes(y = model, color = "Model"), linetype = "solid", size = 1) +
+  geom_line(aes(y = sec$fwd(data), color = "Data"), linetype = "solid", size = 1) +
+  scale_y_continuous(sec.axis = sec_axis(~sec$rev(.), name = "data")) +
+  scale_x_continuous("Month", breaks = 1:12, labels = month.abb) +
+  theme(
+    axis.line.y.right = element_line(color = "red"),
+    axis.ticks.y.right = element_line(color = "red"),
+    axis.text.y.right = element_text(color = "red"),
+    axis.title.y.right = element_text(color = "red"),
+    legend.position = c(0, 1),  # Adjust these values to move the legend around
+    legend.justification = c(0, 1)
+  ) +
+  labs(title = "Comparing Model to Data") +
+  scale_color_manual(name = NULL, values = c("Model" = "blue", "Data" = "red"))
+
+```
+
+It looks like the above figures looks quite good. 
+
+I am now going to do a similar plotting for the other data I collected from the literature. 
+
+```{r}
+# =================================================================================================================
+# This chunk plots data from Kumasi that has been described in the paper by Afrane et al. Parasites & Vectors 2012.
+# =================================================================================================================
+
+# Load library
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+
+# Create a data frame
+kumasi_df <- data.frame(weeks = seq(1, 12, 1),
+                        wells = c(11, 9, 5, 6, 11, 8, 9, 8, 9, 6, 4, 3),
+                        furrows = c(3, 3, 2, 3, 4, 3, 4, 4, 4, 3, 1, 1),
+                        footprint = c(5, 3, 2, 3, 5, 4, 5, 4, 5, 3, 2, 1))
+
+# Create a new column for months
+kumasi_df <- kumasi_df %>%
+  mutate(months = month.abb[ceiling(weeks / 4) + 1])  # Using month abbreviations
+
+# Summarize the data by grouping it by months and calculate totals
+result <- kumasi_df %>%
+  group_by(months) %>%
+  summarize(
+    total_wells = sum(wells),
+    total_furrows = sum(furrows),
+    total_footprint = sum(footprint),
+    totals = sum(wells + furrows + footprint)
+  )
+
+# Create a time series plot
+ggplot(result, aes(x = months, y = totals, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Monthly Totals Time Series",
+       x = "Month",
+       y = "Totals") +
+  scale_x_discrete(labels = result$months) +  # Using actual month names on the x-axis
+  theme_bw()
+
+# Define the order of months
+month_order <- c("Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Create a time series plot
+ggplot(result, aes(x = factor(months, levels = month_order), y = totals, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Monthly Totals Time Series",
+       x = "Month",
+       y = "Totals") +
+  scale_x_discrete() +  # Using the custom order of months on the x-axis
+  theme_bw()
+```
+
+It looks like the above data is not good enough to be compared to the model results. I will just use the previous data that were collected from Kintampo. That seems quite enough to be used to compare to the model. 
+
+
+
+Now let's see the data for Kenya.
+
+Now I want to plot the total mosquito counts for the two western Kenya highland sites (Iguhu, Mbale) and a lowland site, Kombewa. This data was taken from the literature (site). 
+
+```{r}
+# This is the actual data
+kenya_iguhu <- data.frame(
+  month = c("Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"),
+  an.gambiae.iguhu = c(13, 8, 5, 2, 5, 2, 2, 2, 3, 4, 5, 11),
+  an.funestus.iguhu = c(2, 2, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1)
+)
+
+# Calculate the total number of mosquitoes for each month
+kenya_iguhu <- kenya_iguhu %>%
+  mutate(total_mosq.iguhu = an.gambiae.iguhu + an.funestus.iguhu)
+
+# Another site
+kenya_mbale <- data.frame(
+  month = c("Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"),
+  an.gambiae.mbale = c(2, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 2),
+  an.funestus.mbale = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+)
+# Calculate the total number of mosquitoes for each month
+kenya_mbale <- kenya_mbale %>%
+  mutate(total_mosq.mbale = an.gambiae.mbale + an.funestus.mbale)
+
+# Another site
+kenya_kombewa <- data.frame(
+  month = c("Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"),
+  an.gambiae.kombewa = c(9, 0, 1, 1, 1, 0, 0, 1, 1, 2, 6, 8),
+  an.funestus.kombewa = c(17, 4, 1, 1, 3, 3, 3, 2, 2, 6, 6, 12)
+)
+
+# Calculate the total number of mosquitoes for each month
+kenya_kombewa <- kenya_kombewa %>%
+  mutate(total_mosq.kombewa = an.gambiae.kombewa + an.funestus.kombewa)
+
+# Combine data for all 3 sites into one big data frame to allow for plotting together
+kenya_mosq_count <- inner_join(kenya_iguhu, kenya_mbale) %>% 
+  inner_join(kenya_kombewa)
+
+# Reorder the levels of the month variable
+kenya_mosq_count$month <- factor(kenya_mosq_count$month, levels = c("Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May"))
+
+
+# Create a line plot
+ggplot(kenya_mosq_count, aes(x = month)) +
+  geom_line(aes(y = total_mosq.iguhu, group = 1, color = "Iguhu")) +
+  geom_point(aes(y = total_mosq.iguhu, color = "Iguhu")) +
+  geom_line(aes(y = total_mosq.mbale, group = 1, color = "Mbale")) +
+  geom_point(aes(y = total_mosq.mbale, color = "Mbale")) +
+  geom_line(aes(y = total_mosq.kombewa, group = 1, color = "Kombewa")) +
+  geom_point(aes(y = total_mosq.kombewa, color = "Kombewa")) +
+  labs(title = "Monthly Mosquito Counts in different sites in Kenya",
+       x = "Month",
+       y = "Mosquito Count",
+       color = "Site") +
+  scale_color_manual(values = c("Iguhu" = "blue", "Mbale" = "red", "Kombewa" = "orange")) +
+  theme_classic()
+
+```
+
+This is the average mosquito count in the three sites of Kenya. 
+
+
+I will now reshape simulations from the model and compare it with the mosquito collected data
+
+```{r}
+# I averaged the data for 5 years
+df.kenya <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_kenya.csv")
+
+df.kenya <- df.kenya %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month and year information from the time column. Then, calculate the monthly totals considering data from all five years:
+mosquito_kenya <- df.kenya %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2021-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(year, month) %>%
+  summarise(monthly_total = sum(count)) 
+
+# Now I want to separate the data so that I can find the average count for the years the model simulate
+mosquito_2021 <- mosquito_kenya %>% 
+  filter(year==2021) %>% 
+  rename(monthly_total_21 = monthly_total) 
+
+mosquito_2022 <- mosquito_kenya %>% 
+  filter(year == 2022)%>% 
+  rename("year_22" = year, monthly_total_22 = monthly_total)
+
+mosquito_2023 <- mosquito_kenya %>% 
+  filter(year==2023)%>% 
+  rename("2023" = year, monthly_total_23 = monthly_total)
+
+mosquito_2024 <- mosquito_kenya %>% 
+  filter(year==2024)%>% 
+  rename("2024" = year, monthly_total_24 = monthly_total)
+
+mosquito_2025 <- mosquito_kenya %>% 
+  filter(year==2025)%>% 
+  rename("2025" = year, monthly_total_25 = monthly_total)
+
+# Join all these data to form a wide data frame
+mosquito_kenya <- inner_join(mosquito_2021, mosquito_2022) %>% 
+  inner_join(mosquito_2023) %>% 
+  inner_join(mosquito_2024) %>% 
+  inner_join(mosquito_2025)
+
+# Calculate the average monthly abundance for the entire 5 years.
+mosquito_kenya <- mosquito_kenya %>% 
+  mutate(monthly_average = (monthly_total_21 + monthly_total_22 + monthly_total_23 + monthly_total_24 + monthly_total_25)/5)
+
+
+# Show the plot
+ggplot(mosquito_kenya, aes(x = factor(month), y = monthly_average)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  scale_x_discrete(labels = month.abb) +
+  scale_y_continuous(
+    breaks = seq(1, 12, 1) * 1e3,
+    labels = seq(1, 12, 1)
+  ) +
+  ylab(bquote("Mosquitoes abundance" ~ (x ~ 10^3))) +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years") +
+  theme_bw()
+
+# Assuming 'mosquito_average_abund' is your data frame
+ggplot(mosquito_kenya, aes(x = factor(month), y = monthly_average, group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue") +
+  scale_x_discrete(labels = month.abb) +
+  scale_y_continuous(
+    breaks = seq(1, 12, 1) * 1e3,
+    labels = seq(1, 12, 1)
+  ) +
+  ylab(bquote("Mosquitoes abundance" ~ (x ~ 10^3))) +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years") +
+  theme_bw()
+
+```
+
+Now I will super-impose the mosquito collection data with the models simulated data
+
+```{r}
+# kenya_mosq_count # This is the data frame that contains mosquito collection data from the three sites selected in kenya
+
+mosq_col <- data.frame(
+  month = kenya_mosq_count$month,
+  iguhu = kenya_mosq_count$total_mosq.iguhu,
+  mbale = kenya_mosq_count$total_mosq.mbale,
+  kombewa = kenya_mosq_count$total_mosq.kombewa
+)
+
+#mosquito_kenya # Data frame that contains simulated values from the model
+
+mosq_model <- data.frame(
+  month = month.abb,
+  month_num = mosquito_kenya$month,
+  model.21 = mosquito_kenya$monthly_total_21,
+  model.22 = mosquito_kenya$monthly_total_22,
+  model.23 = mosquito_kenya$monthly_total_23,
+  model.24 = mosquito_kenya$monthly_total_24,
+  model.25 = mosquito_kenya$monthly_total_25,
+  model.av = mosquito_kenya$monthly_average
+)
+
+mosq_col_model <- inner_join(mosq_model, mosq_col)
+
+
+ylim.prim <- c(0, 25)   # in this example, model
+ylim.sec <- c(0, 11600)    #in this example, data
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+
+ggplot(mosq_col_model, aes(month_num, kombewa)) +
+  geom_col() +
+  geom_line(aes(y = a + model.av*b), color = "red") +
+  scale_y_continuous("kombewa", sec.axis = sec_axis(~ (. - a)/b, name = "model.av")) +
+  scale_x_continuous("Month", breaks = 1:12, labels = month.abb) +
+  theme(axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"), 
+        axis.title.y.right = element_text(color = "red")
+        ) +
+  ggtitle("Comparing Model to Data for Kenya")
+
+```
+
+```{r}
+ylim.prim <- c(0, 11600)   # in this example, model
+ylim.sec <- c(0, 25)    #in this example, data
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+# Plot for Iguhu data
+ggplot(mosq_col_model, aes(month_num, model.av)) +
+  geom_line() +
+  geom_line(aes(y = a + iguhu * b), color = "red", linetype = "dashed") +
+  scale_y_continuous("model.av", sec.axis = sec_axis(~ (. - a)/b, name = "iguhu")) +
+  scale_x_continuous("Month", breaks = 1:12, labels = month.abb) +  # Use month.abb for month names
+  theme(
+    axis.line.y.right = element_line(color = "red"), 
+    axis.ticks.y.right = element_line(color = "red"),
+    axis.text.y.right = element_text(color = "red"), 
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("Comparing Model to Data collected from Iguhu in Kenya")
+
+# Plot for kombewa data
+model_count_kenya <- ggplot(mosq_col_model, aes(month_num, model.av)) +
+  geom_line(linewidth = 1, color = "orange") +
+  geom_line(aes(y = a + kombewa * b), color = "blue", linetype = 2, linewidth = 1) +
+  geom_line(aes(y = a + iguhu * b), color = "blue", linetype = 3, linewidth = 1) +
+  geom_line(aes(y = a + mbale * b), color = "blue", linetype = 4, linewidth = 1) +
+  #scale_y_continuous("model estimate", sec.axis = sec_axis(~ (. - a)/b, name = "mosquito count")) +
+  scale_y_continuous(bquote("Model estimate" ~ (x ~ 10^3)), breaks = seq(0, 14, 4) * 1e3, 
+                     labels = seq(0, 14, 4), sec.axis = sec_axis(~ (. - a)/b, name = "Mosquito count")) +
+  scale_x_continuous("", breaks = 1:12, labels = month.abb) +  # Use month.abb for month names
+  theme_classic() +
+  theme(axis.line.y.left = element_line(color = "orange"), 
+    axis.ticks.y.left = element_line(color = "orange"),
+    axis.text.y.left = element_text(color = "orange"), 
+    axis.title.y.left = element_text(color = "orange"),
+    axis.line.y.right = element_line(color = "blue"), 
+    axis.ticks.y.right = element_line(color = "blue"),
+    axis.text.y.right = element_text(color = "blue"), 
+    axis.title.y.right = element_text(color = "blue"),
+    axis.text.x = element_text(size = 12, angle = 60, hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(size = 12),
+    text = element_text(size = 12)
+  ) +
+  ggtitle("Comparing model estimates to data collected from 3 sites in Kenya")
+
+model_count_kenya
+
+#ggsave(model_count_kenya, filename = "compare_mosq_count_and_model_kenya.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+I am also plotting mosquito count data from SA
+
+```{r}
+library(ggplot2)
+
+# Your data
+sa_mosq <- data.frame(
+  month = month.abb,
+  count.14 = c(31, 9, 12, 3, 2, 1, 0, 0, 0, 0, 1, 12),
+  count.15 = c(NA, 5, NA, 0, 0, 0, 0, 0, 1, 2, 5, NA),
+  count.16 = c(4, 3, 1, 3, 0, 0, 0, 0, 0, 0, 14, 8),
+  count.17 = c(6, 5, 3, 1, 0, NA, NA, NA, NA, NA, NA, NA)
+)
+
+# Calculate the average count for each month
+sa_mosq$avg_count <- rowMeans(sa_mosq[, -1], na.rm = TRUE)
+
+# Reorder the levels of the month factor
+sa_mosq$month <- factor(sa_mosq$month, levels = month.abb)
+
+# Create a line plot
+ggplot(sa_mosq, aes(x = month, y = avg_count, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Average Mosquito Counts",
+       x = "Month",
+       y = "Average Count for Lapalala in SA") +
+  theme_classic()
+
+```
+
+```{r}
+# Your data for Kyalami in SA
+sa_mosq.kya <- data.frame(
+  month = month.abb,
+  count.14 = c(NA, 1, NA, 1, 0, 0, 0, 0, 0, 0, 0, 1),
+  count.15 = c(0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1),
+  count.16 = c(3, 1, 4, 1, 0, 0, 0, 0, 0, 1, 3, 2),
+  count.17 = c(1, 1, 6, 9, 4, NA, NA, NA, NA, NA, NA, NA)
+)
+
+# Calculate the average count for each month
+sa_mosq.kya$avg_count <- rowMeans(sa_mosq.kya[, -1], na.rm = TRUE)
+
+# Reorder the levels of the month factor
+sa_mosq.kya$month <- factor(sa_mosq.kya$month, levels = month.abb)
+
+# Create a line plot
+ggplot(sa_mosq.kya, aes(x = month, y = avg_count, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Average Mosquito Counts for Kyalami in SA",
+       x = "Month",
+       y = "Average Count") +
+  theme_classic()
+
+
+# Create a bar plot
+ggplot(sa_mosq.kya, aes(x = month, y = avg_count)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black", width = 0.5) +
+  labs(title = "Average Mosquito Counts for Kyalami in Sa",
+       x = "Month",
+       y = "Average Count") +
+  theme_bw()
+```
+
+
+Now I will prepare the data from model simulations and compare it to the mosquito count data
+
+```{r}
+# I averaged the data for 5 years
+df.sa <- read.csv("/Users/jbaafi/Documents/Github/research-project-one/numerical_data/variable.condt_sa.csv")
+
+df.sa <- df.sa %>% 
+  mutate(count = vary.total.adults)
+
+# Extract the month and year information from the time column. Then, calculate the monthly totals considering data from all five years:
+mosquito_sa <- df.sa %>%
+  mutate(year = as.integer(format(as.Date(time, origin = "2021-01-01"), "%Y")),
+         month = as.integer(format(as.Date(time, origin = "2021-01-01"), "%m"))) %>%
+  group_by(year, month) %>%
+  summarise(monthly_total = sum(count)) 
+
+# Now I want to separate the data so that I can find the average count for the years the model simulate
+mosquito_2021 <- mosquito_sa %>% 
+  filter(year==2021) %>% 
+  rename(monthly_total_21 = monthly_total) 
+
+mosquito_2022 <- mosquito_sa %>% 
+  filter(year == 2022)%>% 
+  rename("year_22" = year, monthly_total_22 = monthly_total)
+
+mosquito_2023 <- mosquito_sa %>% 
+  filter(year==2023)%>% 
+  rename("2023" = year, monthly_total_23 = monthly_total)
+
+mosquito_2024 <- mosquito_sa %>% 
+  filter(year==2024)%>% 
+  rename("2024" = year, monthly_total_24 = monthly_total)
+
+mosquito_2025 <- mosquito_sa %>% 
+  filter(year==2025)%>% 
+  rename("2025" = year, monthly_total_25 = monthly_total)
+
+# Join all these data to form a wide data frame
+mosquito_sa <- inner_join(mosquito_2021, mosquito_2022) %>% 
+  inner_join(mosquito_2023) %>% 
+  inner_join(mosquito_2024) %>% 
+  inner_join(mosquito_2025)
+
+# Calculate the average monthly abundance for the entire 5 years.
+mosquito_sa <- mosquito_sa %>% 
+  mutate(monthly_average = (monthly_total_21 + monthly_total_22 + monthly_total_23 + monthly_total_24 + monthly_total_25)/5)
+
+# Does the same as the line above
+mosquito_sa$avg_sim <- rowMeans(mosquito_sa[, c(3, 5, 7, 9, 11)], na.rm = TRUE)
+
+
+# Show the plot
+ggplot(mosquito_sa, aes(x = factor(month), y = monthly_average)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  scale_x_discrete(labels = month.abb) +
+  scale_y_continuous(
+    breaks = seq(1, 12, 1) * 1e3,
+    labels = seq(1, 12, 1)
+  ) +
+  ylab(bquote("Mosquitoes abundance" ~ (x ~ 10^3))) +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years in SA") +
+  theme_bw()
+
+# Assuming 'mosquito_average_abund' is your data frame
+ggplot(mosquito_sa, aes(x = factor(month), y = monthly_average, group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue") +
+  scale_x_discrete(labels = month.abb) +
+  scale_y_continuous(
+    breaks = seq(1, 12, 1) * 1e3,
+    labels = seq(1, 12, 1)
+  ) +
+  ylab(bquote("Mosquitoes abundance" ~ (x ~ 10^3))) +
+  xlab("Month") +
+  ggtitle("Monthly Total Averaged for Five Years in SA") +
+  theme_bw()
+
+```
+
+Now I will super-impose the mosquito collection data with the models simulated data
+
+```{r}
+# sa_mosq
+# sa_mosq.kya
+
+# mosquito_sa <- mosquito_sa %>%
+#   rename(month_num = month) %>%
+#   mutate(month = month.abb)
+
+mosq_col <- data.frame(
+  month = 1:12,
+  month.name = sa_mosq$month,
+  lapalala = sa_mosq$avg_count,
+  kyalami = sa_mosq.kya$avg_count
+)
+
+mosq_col_model <- inner_join(mosq_col, mosquito_sa)
+
+ylim.prim <- c(0, 4530)   # in this example, model
+ylim.sec <- c(0, 6)    #in this example, data
+
+b <- diff(ylim.prim)/diff(ylim.sec)
+a <- ylim.prim[1] - b*ylim.sec[1] 
+
+
+# Plot
+model_count_sa <- ggplot(mosq_col_model, aes(month, avg_sim)) +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  geom_line(aes(y = a + kyalami * b), color = "blue", linetype = 2, linewidth = 1) +
+  geom_line(aes(y = a + lapalala * b), color = "blue", linetype = 3, linewidth = 1) +
+  scale_y_continuous(bquote("Model estimate" ~ (x ~ 10^3)), breaks = seq(1, 8, 2) * 1e3, labels = seq(1, 8, 2), sec.axis = sec_axis(~ (. - a)/b, name = "Mosquito count")) +
+  scale_x_continuous("", breaks = 1:12, labels = month.abb) +  # Use month.abb for month names
+  theme_classic() +
+  theme(axis.line.y.left = element_line(color = "darkgreen"), 
+    axis.ticks.y.left = element_line(color = "darkgreen"),
+    axis.text.y.left = element_text(color = "darkgreen"), 
+    axis.title.y.left = element_text(color = "darkgreen"),
+    axis.line.y.right = element_line(color = "blue"), 
+    axis.ticks.y.right = element_line(color = "blue"),
+    axis.text.y.right = element_text(color = "blue"), 
+    axis.title.y.right = element_text(color = "blue"),
+     axis.text.x = element_text(size = 12, angle = 60, hjust = 0.5, vjust = 0.5),
+        axis.text.y = element_text(size = 12),
+    text = element_text(size = 12)
+  ) +
+  ggtitle("Comparing Model to Data collected from two sites in South Africa")
+
+model_count_sa
+
+
+# Create a data frame with month numbers and names
+#ggsave(model_count_sa, filename = "compare_mosq_count_and_model_sa.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+
+```
+
+Now I will combine the three figures into one 
+```{r}
+# Combine all the plots after the break
+library(cowplot)
+library(magick)
+
+# Load your saved figures
+# Load your saved figures
+
+plot_sa <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/compare_mosq_count_and_model_sa.png", scale = 1)
+plot_kenya <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/compare_mosq_count_and_model_kenya.png", scale = 1)
+plot_ghana <- ggdraw() + draw_image("/Users/jbaafi/Documents/Github/research-project-one/saved plots/compare_mosq_count_and_model_ghana.png", scale = 1)
+
+# Numbering the plots
+
+numbered_plot_sa <- plot_sa + draw_label("(a)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_kenya <- plot_kenya + draw_label("(b)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+numbered_plot_ghana <- plot_ghana+ draw_label("(c)", x = 0, y = 1, vjust = 1, hjust = 0, size = 14)
+
+# Combine the plots
+combined_plot <- plot_grid(
+  numbered_plot_sa, 
+  numbered_plot_kenya,
+  numbered_plot_ghana,
+  ncol = 2
+)
+
+# Display the combined plot
+combined_plot
+
+ggsave(combined_plot, filename = "count_and_estimates_combined.png", path = "/Users/jbaafi/Documents/Github/research-project-one/saved plots")
+```
+
+
+
+
+
+
+
+
+
