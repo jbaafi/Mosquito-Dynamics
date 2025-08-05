@@ -19,6 +19,10 @@ Open the R Markdown file and click **"Knit"** in RStudio, or run the following i
 rmarkdown::render("code/model_summary.Rmd")
 ```
 
+## 📊 Example Output
+![Mosquito Abundance Plot](figures/adult_abundance.png)
+
+
 ## Repository Structure
 
 ```r
